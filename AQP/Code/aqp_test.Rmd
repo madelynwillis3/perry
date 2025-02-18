@@ -1,0 +1,42 @@
+---
+title: "AQP test"
+author: "Madelyn Willis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages('aqp', dep=TRUE)
+install.packages('soilDB', dep=TRUE)
+install.packages('sharpshootR', dep=TRUE)
+install.packages('dendextend', dep=TRUE)
+install.packages('devtools')
+```
+
+```{r}
+# latest versions from GitHub
+devtools::install_github("ncss-tech/aqp", dependencies=FALSE, upgrade_dependencies=FALSE)
+devtools::install_github("ncss-tech/soilDB", dependencies=FALSE, upgrade_dependencies=FALSE)
+devtools::install_github("ncss-tech/sharpshootR", dependencies=FALSE, upgrade_dependencies=FALSE)
+```
+
+```{r}
+
+library(aqp)
+library(soilDB)
+
+
+s <- c('tifton', 'vaucluse', 'faceville', 'lakeland','sumter','boswell','oktibbeha','lucy','orangeburg','dothan','norfolk','susquehanna','lynchburg','grady','greenville') #missing red bay and others
+
+# get basic morphology and extended data from SoilWeb cache
+osds.full <- fetchOSD(s, extended = TRUE)
+
+# save copy of SoilProfileCollection for later
+osds <- osds.full$SPC
+
+explainPlotSPC(osds)
+
+#gather site data separately
+```
+

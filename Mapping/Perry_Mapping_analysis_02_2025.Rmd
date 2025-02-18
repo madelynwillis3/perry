@@ -21,7 +21,8 @@ library(raster)
 library(terra)
 library(ggplot2)
 library(viridis)
-
+library(corrr)
+library(rstac)
 ```
 
 
@@ -66,10 +67,7 @@ soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, 
 ```{r Bare Soil}
 #planet bare soil imagery: 
 bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
-
-#clip planet imagery by border:
-clipped_baresoil <- mask(bare_soil, vect(border))
-
+bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear")
 
 # SURFACE REFLECTANCE:
 
@@ -77,12 +75,12 @@ reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Band
                              2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
 
 # Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
-surface_reflectance <- bare_soil  # Copy raster structure
+surface_reflectance <- bare_soil
 for (i in 1:nlyr(bare_soil)) { #for every band, multiply value by its band coefficient
   surface_reflectance[[i]] <- bare_soil[[i]] * reflectanceCoefficients[i]
 }
 
-# Save the new SR
+# Save new SR
 writeRaster(surface_reflectance, "Output/Bare_soil/SR.tif", overwrite = TRUE)
 
   # Plot random band:
@@ -95,13 +93,13 @@ plot(bare_soil[[7]])
 
 # Veg data: Planet 
 Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
-
+Vegstack_wgs84 <- project(Vegstack, "EPSG:4326", method = "bilinear")
 
 #NDVI:
 
 
-NIR <- Vegstack[[8]]  # NIR band
-Red <- Vegstack[[6]]  # Red band
+NIR <- Vegstack_wgs84[[8]]  # NIR band
+Red <- Vegstack_wgs84[[6]]  # Red band
 
 # formula
 NDVI <- (NIR - Red) / (NIR + Red)
@@ -127,46 +125,92 @@ plot(SAVI)
 ```{r 1m DEM}
 
 #USGS 1m DEM:
-USGS_DEM <- rast("Data/USGS DEM/DEM rasters/USGS_WGS1984.tif")
-#clip USGS_DEM
-clipped_USGS_DEM <- mask(USGS_DEM, vect(border))
+USGS_DEM <- rast("Data/USGS DEM/DEM rasters/output_USGS1_test_m.tif")
+USGS_DEM_wgs84 <- project(USGS_DEM, "EPSG:4326", res = 1, method = "bilinear")
 
 
-#Visualizations. not projected  yet:
+
+#Visualizations via OpenTopography:
 aspect <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
+aspect_wgs84 <- project(aspect, "EPSG:4326",res = 1, method = "bilinear")
+
 color_relief <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
+color_relief_wgs84 <- project(color_relief, "EPSG:4326",res = 1, method = "bilinear")
+
 color_hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
+color_hillshade_wgs84 <- project(color_hillshade, "EPSG:4326",res = 1, method = "bilinear")
+
 hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
+hillshade_wgs84 <- project(hillshade, "EPSG:4326",res = 1, method = "bilinear")
+
 roughness <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
+roughness_wgs84 <- project(roughness, "EPSG:4326",res = 1, method = "bilinear")
+
 slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
+slope_wgs84 <- project(slope, "EPSG:4326",res = 1, method = "bilinear")
 
 
+#SAGA visualizations:
+slope_height <-rast("Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
+slope_height_wgs84 <- project(slope_height, "EPSG:4326",res = 1, method = "bilinear")
 
+valley_depth <-rast("Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
+valley_depth_wgs84 <- project(valley_depth, "EPSG:4326",res = 1, method = "bilinear")
+
+norm_height <-rast("Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
+norm_height_wgs84 <- project(norm_height, "EPSG:4326",res = 1, method = "bilinear")
+
+std_height <-rast("Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
+std_height_wgs84 <- project(std_height, "EPSG:4326",res = 1, method = "bilinear")
+
+mid_slope_pos <-rast("Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
+mid_slope_pos_wgs84 <- project(mid_slope_pos, "EPSG:4326",res = 1, method = "bilinear")
+
+topo_pos_index <-rast("Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
+topo_pos_index_wgs84 <- project(topo_pos_index, "EPSG:4326",res = 1, method = "bilinear")
+
+topo_wet_index <-rast("Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
+topo_wet_index_wgs84 <- project(topo_wet_index, "EPSG:4326",res = 1, method = "bilinear")
+
+terr_rugged_index <-rast("Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
+terr_rugged_index_wgs84 <- project(terr_rugged_index, "EPSG:4326",res = 1, method = "bilinear")
+
+mrvbf <-rast("Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
+mrvbf_wgs84 <- project(mrvbf, "EPSG:4326",res = 1, method = "bilinear")
+
+mrrtf <-rast("Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
+mrrtf_wgs84 <- project(mrrtf, "EPSG:4326",res = 1, method = "bilinear")
 
 
 ```
 
-```{r }
 
-```
+##Data Wrangling
 
 
-```{r Rescaling Planet Data}
+```{r Rescaling Planet Data} 
+#NOT WORKING :(
+
+#ALL PLANET DATA MUST BE RESCALED TO MATCH DEM (1m) DATA
+    #I will be using USGS_DEM_wgs84 for this
+
 #Bare_soil:
-  # 1m resolution
-target_raster <- rast(clipped_USGS_DEM)
 
-# Resample to USGS resolution
-resampled_bare_soil <- resample(bare_soil, target_raster)
-clipped_bare_soil <- mask(resampled_bare_soil, border)  #clip again
+bare_soil_1m <- resample(rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif"), USGS_DEM_wgs84, method = "bilinear")
 
+#SR:
 
-
+surface_reflectance_1m <- resample(surface_reflectance, USGS_DEM_wgs84, method = "bilinear")
 
 #NDVI:
 
+NDVI_1m <- resample(NDVI, USGS_DEM_wgs84, method = "bilinear")
+
+
 #Other planet data:
 
+  #SAVI:
+SAVI_1m <- resample(SAVI, USGS_DEM_wgs84, method = "bilinear")
 
 
 #confirm with res()
@@ -186,7 +230,7 @@ soil_points$snapped_value <- snapped_points
 
 
 # Convert the raster to a data frame
-raster_df <- as.data.frame(resampled_bare_soil, xy = TRUE, na.rm = TRUE)
+raster_df <- as.data.frame(bare_soil, xy = TRUE, na.rm = TRUE)
 
 #name column layer
 colnames(raster_df)[3] <- "layer"  
@@ -203,17 +247,27 @@ ggplot() +
 
 
 
+
+
 ```
 
 
 ```{r Clipping Dataset }
+#clip USGS_DEM
+clipped_USGS_DEM <- mask(USGS_DEM_wgs84, vect(border))
+
+#Bare soil
+clipped_bare_soil <- mask(bare_soil_wgs84, vect(border))
+
+#SR
+clipped_SR <- mask(surface_reflectance_1m, vect(border))
+
 
 
 
 ```
 
-##Data Wrangling
-```{r Data Wrangling}
+```{r Organizing}
 
 ```
 

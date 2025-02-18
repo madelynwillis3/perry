@@ -11,10 +11,10 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 
 #libraries
-library(reticulate)
-library(rgee)
+#library(reticulate)
+#library(rgee)
 #ee_Authenticate()
-ee_Initialize()
+#ee_Initialize()
 library(sf)
 library(tidyverse)
 library(raster)
@@ -31,7 +31,7 @@ library(viridis)
 
 #Grabbing geojson border shapefile:
 border <- st_read("Data/Border/Border_json.geojson")
-aoi <- sf_as_ee(border)
+#aoi <- sf_as_ee(border) #open back up when on laptop
 
 ```
 
@@ -55,11 +55,11 @@ soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, 
 #GEE:
 
 #filtering geojson by AOI:
-image_collection <- ee$ImageCollection("LANDSAT/LC08/C01/T1_SR")$
-  filterBounds(aoi)
+#image_collection <- ee$ImageCollection("LANDSAT/LC08/C01/T1_SR")$
+#  filterBounds(aoi)
 
 #grabbing bands from LANDSAT8: 
-image_banding <- image_collection$select(c('B2', 'B3', 'B4', 'B5', 'B6', 'B7'))
+#image_banding <- image_collection$select(c('B2', 'B3', 'B4', 'B5', 'B6', 'B7'))
 
 ```
 
@@ -93,7 +93,7 @@ plot(bare_soil[[7]])
 
 ```{r NDVI}
 
-# Stack all the bands together
+# Veg data: Planet 
 Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
 
 
@@ -166,15 +166,20 @@ target_raster <- rast(clipped_USGS_DEM)
 resampled_bare_soil <- resample(bare_soil, target_raster)
 clipped_bare_soil <- mask(resampled_bare_soil, border)  #clip again
 
-# Plot the resampled raster
-plot(clipped_bare_soil)
+
+
+
 #NDVI:
 
 #Other planet data:
+
+
+
+#confirm with res()
 ```
 
 
-```{r Data Snapping}
+```{r Data Snapping }
 
 # vect the sample data
 soil_points_vect <- vect(soil_points)
@@ -207,8 +212,8 @@ ggplot() +
 ```
 
 
-```{r Clipping Dataset, echo=FALSE}
-#Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r Clipping Dataset }
+
 
 
 ```

@@ -1,0 +1,9 @@
+AQP stuff
+
+-decided i needed to clean up my data before ANYTHING
+-putting all textures percentages in ONE PLACE
+
+-tomorrow: try to merge all texture excels into one with an R file.??
+-finish inputting data into master sheet.
+-copy and remake master file to make it more AQP friendly
+-then input it into the AQP R file

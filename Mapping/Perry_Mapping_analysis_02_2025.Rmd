@@ -5,43 +5,204 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+##Unloading Necessary Packages
 ```{r Packages, include=FALSE}
 #chunk options
 knitr::opts_chunk$set(echo = TRUE)
 
 #libraries
 library(reticulate)
-#py_discover_config()
-#reticulate::py_install("earthengine-api", envname = "rgee")
 library(rgee)
+#ee_Authenticate()
 ee_Initialize()
 library(sf)
+library(tidyverse)
+library(raster)
+library(terra)
+library(ggplot2)
+library(viridis)
 
 ```
 
 
+##Pulling Data/Imagery
+```{r AOI}
+#FYI: USING WGS 84 as it is what GEE uses.
 
-```{r Data Pulling}
-#Shapefile pull:
-aoi <- st_read("path_to_your_shapefile.shp") %>% 
-       sf_as_ee()  # Convert to Earth Engine object
+#Grabbing geojson border shapefile:
+border <- st_read("Data/Border/Border_json.geojson")
+aoi <- sf_as_ee(border)
+
+```
+
+```{r Soil Samples}
+#NOTE: I am currently using the AESL samples taken in 2024, all composite samples taken at a 4 acre grid scale.
+
+#Grabbing Sample ID's
+soil_points <- st_read("Data/Samples/CompositeOdds_WGS1984.shp")
+
+
+#CSV of AESL data:
+soil_C_4ac <- read.csv("Data/Samples/Perry_Composite_4ac.csv")
+
+# Merge points + sample data:
+soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, since we only have composite data back so far.
+
+```
+
+
+```{r LANDSAT}
+#GEE:
+
+#filtering geojson by AOI:
+image_collection <- ee$ImageCollection("LANDSAT/LC08/C01/T1_SR")$
+  filterBounds(aoi)
+
+#grabbing bands from LANDSAT8: 
+image_banding <- image_collection$select(c('B2', 'B3', 'B4', 'B5', 'B6', 'B7'))
+
+```
+
+```{r Bare Soil}
+#planet bare soil imagery: 
+bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
+
+#clip planet imagery by border:
+clipped_baresoil <- mask(bare_soil, vect(border))
+
+
+# SURFACE REFLECTANCE:
+
+reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Bands 1-4 
+                             2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
+
+# Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
+surface_reflectance <- bare_soil  # Copy raster structure
+for (i in 1:nlyr(bare_soil)) { #for every band, multiply value by its band coefficient
+  surface_reflectance[[i]] <- bare_soil[[i]] * reflectanceCoefficients[i]
+}
+
+# Save the new SR
+writeRaster(surface_reflectance, "Output/Bare_soil/SR.tif", overwrite = TRUE)
+
+  # Plot random band:
+plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
+plot(bare_soil[[7]])
+
+```
+
+```{r NDVI}
+
+# Stack all the bands together
+Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
+
+
+#NDVI:
+
+
+NIR <- Vegstack[[8]]  # NIR band
+Red <- Vegstack[[6]]  # Red band
+
+# formula
+NDVI <- (NIR - Red) / (NIR + Red)
+
+# Plot NDVI
+plot(NDVI)
+
+
+#SAVI: 
+
+
+L <- 0.5  # adjustable
+
+# formula
+SAVI <- ((NIR - Red) / (NIR + Red + L)) * (1 + L)
+
+# Plot SAVI
+plot(SAVI)
+
+```
+
+
+```{r 1m DEM}
+
+#USGS 1m DEM:
+USGS_DEM <- rast("Data/USGS DEM/DEM rasters/USGS_WGS1984.tif")
+#clip USGS_DEM
+clipped_USGS_DEM <- mask(USGS_DEM, vect(border))
+
+
+#Visualizations. not projected  yet:
+aspect <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
+color_relief <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
+color_hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
+hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
+roughness <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
+slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
+
+
 
 
 
 ```
 
+```{r }
 
+```
+
+
+##Data Wrangling
 ```{r Data Wrangling}
 
 ```
 
 
 ```{r Rescaling Planet Data}
+#Bare_soil:
+  # 1m resolution
+target_raster <- rast(clipped_USGS_DEM)
 
+# Resample to USGS resolution
+resampled_bare_soil <- resample(bare_soil, target_raster)
+clipped_bare_soil <- mask(resampled_bare_soil, border)  #clip again
+
+# Plot the resampled raster
+plot(clipped_bare_soil)
+#NDVI:
+
+#Other planet data:
 ```
 
 
 ```{r Data Snapping}
+
+# vect the sample data
+soil_points_vect <- vect(soil_points)
+
+# Snap the points to the raster: (confirming each point is within the raster grid)
+snapped_points <- terra::extract(bare_soil, soil_points_vect, method = "bilinear", small = TRUE)
+
+# Combine snapped points with their corresponding properties
+soil_points$snapped_value <- snapped_points
+
+
+# Convert the raster to a data frame
+raster_df <- as.data.frame(resampled_bare_soil, xy = TRUE, na.rm = TRUE)
+
+#name column layer
+colnames(raster_df)[3] <- "layer"  
+
+# Plot 
+ggplot() +
+  # Raster layer
+  geom_raster(data = raster_df, aes(x = x, y = y, fill = layer)) +
+  scale_fill_viridis_c() + #color friendly 
+  # Soil points layer
+  geom_sf(data = soil_points, aes(color = "red"), size = 2) + 
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
 
 ```
 

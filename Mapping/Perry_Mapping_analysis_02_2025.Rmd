@@ -151,12 +151,6 @@ slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
 ```
 
 
-##Data Wrangling
-```{r Data Wrangling}
-
-```
-
-
 ```{r Rescaling Planet Data}
 #Bare_soil:
   # 1m resolution
@@ -218,32 +212,39 @@ ggplot() +
 
 ```
 
+##Data Wrangling
+```{r Data Wrangling}
 
+```
+
+##Correlation Matrix
 ```{r Correlation Matrix }
 
 ```
 
-
+#Stack Results
 ```{r Stack data }
 
 ```
 
+#Kriging
 ```{r PA method}
 
 ```
 
+#RF
 ```{r DSM method}
 
 ```
-
+#Classification
 ```{r Classification}
 
 ```
-
+#Condense
 ```{r Flatten Stacks}
 
 ```
-
+#Clean Maps
 ```{r Clean Up Maps}
 
 ```

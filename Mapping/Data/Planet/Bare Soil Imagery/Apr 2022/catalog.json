@@ -1,0 +1,18 @@
+{
+  "type": "Catalog",
+  "id": "6e059be4-b52a-41de-9927-a6b423667383",
+  "stac_version": "1.0.0",
+  "description": "Perry_04_2022_SR",
+  "links": [
+    {
+      "rel": "root",
+      "href": "./catalog.json",
+      "type": "application/json"
+    },
+    {
+      "rel": "child",
+      "href": "./PSScene/PSScene_collection.json",
+      "type": "application/json"
+    }
+  ]
+}

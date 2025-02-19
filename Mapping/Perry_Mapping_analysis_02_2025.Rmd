@@ -10,7 +10,7 @@ output: html_document
 #chunk options
 knitr::opts_chunk$set(echo = TRUE)
 
-#libraries
+    #libraries
 #library(reticulate)
 #library(rgee)
 #ee_Authenticate()
@@ -23,6 +23,14 @@ library(ggplot2)
 library(viridis)
 library(corrr)
 library(rstac)
+library(ggcorrplot)
+library(GGally)
+library(randomForest)
+library(sf)
+library(sp)
+library(gstat)
+library(raster)
+library(automap)
 ```
 
 
@@ -40,7 +48,7 @@ border <- st_read("Data/Border/Border_json.geojson")
 #NOTE: I am currently using the AESL samples taken in 2024, all composite samples taken at a 4 acre grid scale.
 
 #Grabbing Sample ID's
-soil_points <- st_read("Data/Samples/CompositeOdds_WGS1984.shp")
+soil_points <- st_read("Data/Samples/Composite_Odds_17N.shp")
 
 
 #CSV of AESL data:
@@ -48,6 +56,7 @@ soil_C_4ac <- read.csv("Data/Samples/Perry_Composite_4ac.csv")
 
 # Merge points + sample data:
 soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, since we only have composite data back so far.
+
 
 ```
 
@@ -124,71 +133,126 @@ plot(SAVI)
 
 ```{r 1m DEM}
 
-#USGS 1m DEM:
-USGS_DEM <- rast("Data/USGS DEM/DEM rasters/output_USGS1_test_m.tif")
-USGS_DEM_wgs84 <- project(USGS_DEM, "EPSG:4326", res = 1, method = "bilinear")
+# Load the USGS 1m DEM (acts as the template)
+USGS_DEM <- rast("Data/USGS DEM/DEM rasters/output_USGS1m.tif")
 
+# border:
+border <- vect("Data/Border/border_17N.shp")
 
+# Crop and mask the DEM to the border extent
+clipped_DEM <- crop(USGS_DEM, border) |> mask(border)
 
-#Visualizations via OpenTopography:
-aspect <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
-aspect_wgs84 <- project(aspect, "EPSG:4326",res = 1, method = "bilinear")
+# Load all topographic rasters
+topo_files <- list.files("Data/all rasters/", full.names = TRUE)
+topo_rasters <- lapply(topo_files, rast)
 
-color_relief <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
-color_relief_wgs84 <- project(color_relief, "EPSG:4326",res = 1, method = "bilinear")
+# Function to align rasters (clip first, then resample to 1m)
+align_raster <- function(r, template, border) {
+  # Reproject raster
+  if (crs(r) != crs(template)) {
+    r <- project(r, crs(template), method = "bilinear")
+  }
+  # Resample to match the clipped DEM's resolution
+  r <- resample(r, template, method = "bilinear")
+  # Crop and mask to the border FIRST
+  r <- crop(r, border) |> mask(border)
 
-color_hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
-color_hillshade_wgs84 <- project(color_hillshade, "EPSG:4326",res = 1, method = "bilinear")
+  return(r)
+}
 
-hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
-hillshade_wgs84 <- project(hillshade, "EPSG:4326",res = 1, method = "bilinear")
+# Align all rasters
+aligned_rasters <- lapply(topo_rasters, align_raster, template = clipped_DEM, border = border)
 
-roughness <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
-roughness_wgs84 <- project(roughness, "EPSG:4326",res = 1, method = "bilinear")
+# Stack aligned rasters
+clipped_stack <- rast(aligned_rasters)
 
-slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
-slope_wgs84 <- project(slope, "EPSG:4326",res = 1, method = "bilinear")
-
-
-#SAGA visualizations:
-slope_height <-rast("Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
-slope_height_wgs84 <- project(slope_height, "EPSG:4326",res = 1, method = "bilinear")
-
-valley_depth <-rast("Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
-valley_depth_wgs84 <- project(valley_depth, "EPSG:4326",res = 1, method = "bilinear")
-
-norm_height <-rast("Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
-norm_height_wgs84 <- project(norm_height, "EPSG:4326",res = 1, method = "bilinear")
-
-std_height <-rast("Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
-std_height_wgs84 <- project(std_height, "EPSG:4326",res = 1, method = "bilinear")
-
-mid_slope_pos <-rast("Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
-mid_slope_pos_wgs84 <- project(mid_slope_pos, "EPSG:4326",res = 1, method = "bilinear")
-
-topo_pos_index <-rast("Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
-topo_pos_index_wgs84 <- project(topo_pos_index, "EPSG:4326",res = 1, method = "bilinear")
-
-topo_wet_index <-rast("Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
-topo_wet_index_wgs84 <- project(topo_wet_index, "EPSG:4326",res = 1, method = "bilinear")
-
-terr_rugged_index <-rast("Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
-terr_rugged_index_wgs84 <- project(terr_rugged_index, "EPSG:4326",res = 1, method = "bilinear")
-
-mrvbf <-rast("Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
-mrvbf_wgs84 <- project(mrvbf, "EPSG:4326",res = 1, method = "bilinear")
-
-mrrtf <-rast("Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
-mrrtf_wgs84 <- project(mrrtf, "EPSG:4326",res = 1, method = "bilinear")
+# Summary check
+summary(clipped_stack)
 
 
 ```
 
 
+```{r 1m rasters, eval = FALSE}
+
+#Visualizations via OpenTopography:
+aspect <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
+#aspect_wgs84 <- project(aspect, "EPSG:4326",res = 1, method = "bilinear")
+clipped_aspect <- mask(aspect, vect(border))
+plot(clipped_aspect)
+
+color_relief <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
+color_relief_wgs84 <- project(color_relief, "EPSG:4326",res = 1, method = "bilinear")
+clipped_color_relief_wgs84 <- mask(color_relief_wgs84, vect(border))
+
+color_hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
+color_hillshade_wgs84 <- project(color_hillshade, "EPSG:4326",res = 1, method = "bilinear")
+clipped_color_hillshade_wgs84 <- mask(color_hillshade_wgs84, vect(border))
+
+hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
+hillshade_wgs84 <- project(hillshade, "EPSG:4326",res = 1, method = "bilinear")
+clipped_hillshade_wgs84 <- mask(hillshade_wgs84, vect(border))
+
+roughness <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
+roughness_wgs84 <- project(roughness, "EPSG:4326",res = 1, method = "bilinear")
+clipped_roughness_wgs84 <- mask(roughness_wgs84, vect(border))
+
+slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
+slope_wgs84 <- project(slope, "EPSG:4326",res = 1, method = "bilinear")
+clipped_slope_wgs84 <- mask(slope_wgs84, vect(border))
+
+
+#SAGA visualizations:
+slope_height <-rast("Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
+slope_height_wgs84 <- project(slope_height, "EPSG:4326",res = 1, method = "bilinear")
+clipped_slope_height_wgs84 <- mask(slope_height_wgs84, vect(border))
+
+valley_depth <-rast("Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
+valley_depth_wgs84 <- project(valley_depth, "EPSG:4326",res = 1, method = "bilinear")
+clipped_valley_depth_wgs84 <- mask(valley_depth_wgs84, vect(border))
+
+norm_height <-rast("Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
+norm_height_wgs84 <- project(norm_height, "EPSG:4326",res = 1, method = "bilinear")
+clipped_norm_height_wgs84 <- mask(norm_height_wgs84, vect(border))
+
+std_height <-rast("Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
+std_height_wgs84 <- project(std_height, "EPSG:4326",res = 1, method = "bilinear")
+clipped_std_height_wgs84 <- mask(std_height_wgs84, vect(border))
+
+mid_slope_pos <-rast("Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
+mid_slope_pos_wgs84 <- project(mid_slope_pos, "EPSG:4326",res = 1, method = "bilinear")
+clipped_mid_slope_pos_wgs84 <- mask(mid_slope_pos_wgs84, vect(border))
+
+topo_pos_index <-rast("Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
+topo_pos_index_wgs84 <- project(topo_pos_index, "EPSG:4326",res = 1, method = "bilinear")
+clipped_topo_pos_index_wgs84 <- mask(topo_pos_index_wgs84, vect(border))
+
+topo_wet_index <-rast("Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
+topo_wet_index_wgs84 <- project(topo_wet_index, "EPSG:4326",res = 1, method = "bilinear")
+clipped_topo_wet_index_wgs84 <- mask(topo_wet_index_wgs84, vect(border))
+
+terr_rugged_index <-rast("Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
+terr_rugged_index_wgs84 <- project(terr_rugged_index, "EPSG:4326",res = 1, method = "bilinear")
+clipped_terr_rugged_index_wgs84 <- mask(terr_rugged_index_wgs84, vect(border))
+
+mrvbf <-rast("Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
+mrvbf_wgs84 <- project(mrvbf, "EPSG:4326",res = 1, method = "bilinear")
+clipped_mrvbf_wgs84 <- mask(mrvbf_wgs84, vect(border))
+
+mrrtf <-rast("Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
+mrrtf_wgs84 <- project(mrrtf, "EPSG:4326",res = 1, method = "bilinear")
+clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, vect(border))
+
+
+```
+
+
+
+
 ##Data Wrangling
 
 
-```{r Rescaling Planet Data} 
+```{r Rescaling Planet Data, eval = FALSE} 
 #NOT WORKING :(
 
 #ALL PLANET DATA MUST BE RESCALED TO MATCH DEM (1m) DATA
@@ -216,21 +280,53 @@ SAVI_1m <- resample(SAVI, USGS_DEM_wgs84, method = "bilinear")
 #confirm with res()
 ```
 
+```{r Clipping Dataset, eval = FALSE }
 
-```{r Data Snapping }
+
+#Bare soil
+clipped_bare_soil <- mask(bare_soil, vect(border))
+
+#SR
+clipped_SR <- mask(surface_reflectance_1m, vect(border))
+
+
+
+
+```
+
+```{r SNAP}
+
+# Convert soil points to raster
+soil_raster <- rasterize(vect(soil_points), topo_rasters[[1]], field = 1)
+soil_raster_clipped <- crop(soil_raster, border, mask = TRUE)
+
+# snap func
+snap_to_soil <- function(r) {
+  resample(r, soil_raster_clipped , method = "bilinear")
+}
+
+# Apply snapping to all pre-aligned rasters?
+snapped_rasters <- lapply(aligned_rasters, snap_to_soil)
+
+# Convert back to stack
+snapped_stack <- rast(snapped_rasters)
+
+```
+
+```{r Data Snapping, eval = FALSE }
 
 # vect the sample data
 soil_points_vect <- vect(soil_points)
 
 # Snap the points to the raster: (confirming each point is within the raster grid)
-snapped_points <- terra::extract(bare_soil, soil_points_vect, method = "bilinear", small = TRUE)
+snapped_points <- terra::extract(clipped_aspect_wgs84, soil_points_vect, method = "bilinear", small = TRUE)
 
 # Combine snapped points with their corresponding properties
 soil_points$snapped_value <- snapped_points
 
 
 # Convert the raster to a data frame
-raster_df <- as.data.frame(bare_soil, xy = TRUE, na.rm = TRUE)
+raster_df <- as.data.frame(clipped_aspect_wgs84, xy = TRUE, na.rm = TRUE)
 
 #name column layer
 colnames(raster_df)[3] <- "layer"  
@@ -252,43 +348,187 @@ ggplot() +
 ```
 
 
-```{r Clipping Dataset }
-#clip USGS_DEM
-clipped_USGS_DEM <- mask(USGS_DEM_wgs84, vect(border))
 
-#Bare soil
-clipped_bare_soil <- mask(bare_soil_wgs84, vect(border))
-
-#SR
-clipped_SR <- mask(surface_reflectance_1m, vect(border))
-
-
-
-
-```
 
 ```{r Organizing}
+# Extract raster values at soil sample points
+extracted_raster_values <- extract(snapped_stack, soil_points, xy = FALSE)
 
+# Convert to a data frame
+raster_df <- as.data.frame(extracted_raster_values)
+
+
+soil_df <- soil_points %>%
+  st_drop_geometry() %>%
+  as.data.frame()  # Convert to a plain data frame
+
+# Select only the desired columns explicitly using base R
+soil_df <- soil_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
+
+# Merge extracted raster values with soil data
+combined_df <- cbind(soil_df, raster_df)
 ```
+
+
 
 ##Correlation Matrix
-```{r Correlation Matrix }
+```{r Cor() }
+# Compute correlation matrix
+cor_matrix <- cor(combined_df, use = "pairwise.complete.obs", method = "spearman")
 
 ```
+
+```{r plotting CM }
+#formatting:
+ggcorrplot(cor_matrix, type = "lower", 
+           lab = TRUE, show.legend = TRUE, 
+           tl.cex = 4, # Adjust text size
+           lab_size = 2, # Adjust correlation label size
+           tl.srt = 45) # Rotate axis labels
+
+ggcorrplot(cor_matrix, type = "lower", 
+           lab = TRUE, show.legend = TRUE, 
+           tl.cex = 4, # Adjust text size
+           lab_size = 2, # Adjust correlation label size
+           tl.srt = 45,           
+           hc.order = TRUE, # Cluster similar variables together
+           insig = "blank", # Hide insignificant correlations
+           p.mat = cor_pmat(combined_df)
+           ) # Rotate axis labels
+
+
+# col name of soil properties
+soil_vars <- colnames(soil_df)
+# topo name list
+topo_vars <- setdiff(colnames(combined_df), soil_vars)
+
+# Compute correlation matrix only between soil properties and topo rasters
+cor_matrix_soil_topo <- cor(combined_df[, soil_vars], combined_df[, topo_vars], 
+                            use = "pairwise.complete.obs", method = "spearman")
+
+# Visualize
+ggcorrplot(cor_matrix_soil_topo, lab = TRUE, show.legend = TRUE, 
+           tl.cex = 5, lab_size = 2, tl.srt = 45, method = "circle")
+
+
+
+
+#scatterplot
+
+
+
+```
+
+```{r corr buffer test, eval=FALSE, include=FALSE}
+# Step 1: Create a buffer around soil points
+buffer_distance_m <- 104.35 * 0.3048  # Convert feet to meters
+soil_buffers <- st_buffer(soil_points, dist = buffer_distance_m)
+
+# Step 2: Extract raster values from the buffers
+extracted_raster_values_buffer <- extract(snapped_stack, soil_buffers, xy = FALSE)
+
+# Convert to a data frame
+raster_df_buffer <- as.data.frame(extracted_raster_values_buffer)
+
+# Step 3: Select relevant soil data columns
+soil_df <- soil_points %>%
+  st_drop_geometry() %>%
+  as.data.frame()  # Convert to a plain data frame
+
+# Select only the desired columns explicitly using base R
+soil_df <- soil_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
+
+# Merge extracted raster values with soil data
+combined_df_buffer <- cbind(soil_df, raster_df_buffer)
+
+# Step 4: Compute the correlation matrix
+cor_matrix_buffer <- cor(combined_df_buffer, use = "pairwise.complete.obs", method = "spearman")
+
+# Print the correlation matrix
+print(cor_matrix_buffer)
+
+# Optionally, visualize correlations with a heatmap
+library(ggcorrplot)
+ggcorrplot(cor_matrix_buffer, type = "lower", lab = TRUE, show.legend = TRUE)
+
+```
+
+
+
 
 #Stack Results
 ```{r Stack data }
+#select correlated rasters and soil properties:
 
+# Function to extract top correlated rasters
+get_top_correlated <- function(soil_var, corr_matrix, n = 3) {
+  top_vars <- names(sort(abs(corr_matrix[soil_var, ]), decreasing = TRUE)[1:n])
+  return(top_vars)
+}
 ```
 
 #Kriging
 ```{r PA method}
 
+# Kriging Loop
+for (var in soil_vars) {
+  # Subset soil points
+  soil_sub <- soil_points[, c("geometry", var)]
+  
+  # Convert to spatial object
+  soil_sp <- as(soil_sub, "Spatial")
+  
+  # Fit variogram and kriging model
+  vgm_model <- autofitVariogram(as.formula(paste(var, "~ 1")), soil_sp)
+  krige_result <- krige(as.formula(paste(var, "~ 1")), soil_sp, topo_rasters, model = vgm_model$var_model)
+  
+  # Convert kriged data to raster
+  r_kriged <- rast(krige_result)
+  names(r_kriged) <- var
+  
+  # Store in list
+  kriged_rasters[[var]] <- r_kriged
+}
+
 ```
 
 #RF
 ```{r DSM method}
+# -------------------------------
+# RANDOM FOREST FOR SOIL VARIABLES
+# -------------------------------
 
+# Create empty list to store predicted rasters
+rf_rasters <- list()
+
+# Loop through soil variables
+for (var in soil_vars) {
+  # Get top correlated topo rasters
+  top_rasters <- get_top_correlated(var, corr_matrix, n = 3)
+  
+  # Extract raster values at soil sample points
+  extracted_data <- extract(topo_stack[[top_rasters]], soil_data)
+  
+  # Combine with soil values
+  model_data <- cbind(soil_data[var], extracted_data)
+  model_data <- na.omit(model_data)  # Remove NAs
+  
+  # Train Random Forest model
+  rf_model <- randomForest(as.formula(paste(var, "~ .")), data = model_data, ntree = 500)
+  
+  # Predict across the study area
+  pred_raster <- predict(topo_stack[[top_rasters]], rf_model)
+  names(pred_raster) <- var
+  
+  # Store in list
+  rf_rasters[[var]] <- pred_raster
+}
+
+# Stack all RF-predicted rasters
+rf_stack <- do.call(c, rf_rasters)
+
+# Save RF raster stack
+writeRaster(rf_stack, "rf_soil_stack.tif", overwrite = TRUE)
 ```
 #Classification
 ```{r Classification}

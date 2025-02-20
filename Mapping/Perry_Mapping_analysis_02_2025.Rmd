@@ -76,7 +76,9 @@ soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, 
 ```{r Bare Soil}
 #planet bare soil imagery: 
 bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
-bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear")
+bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
+bare_soil_res1 <- resample(bare_soil, USGS_DEM)
+
 
 # SURFACE REFLECTANCE:
 
@@ -250,6 +252,7 @@ clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, vect(border))
 
 
 ##Data Wrangling
+
 
 
 ```{r Rescaling Planet Data, eval = FALSE} 
@@ -461,77 +464,110 @@ ggcorrplot(cor_matrix_buffer, type = "lower", lab = TRUE, show.legend = TRUE)
 #select correlated rasters and soil properties:
 
 # Function to extract top correlated rasters
-get_top_correlated <- function(soil_var, corr_matrix, n = 3) {
-  top_vars <- names(sort(abs(corr_matrix[soil_var, ]), decreasing = TRUE)[1:n])
+get_top_correlated <- function(soil_vars, cor_matrix, n = 3) {
+  top_vars <- names(sort(abs(cor_matrix[soil_var, ]), decreasing = TRUE)[1:n])
   return(top_vars)
 }
 ```
 
 #Kriging
 ```{r PA method}
-
-# Kriging Loop
-for (var in soil_vars) {
-  # Subset soil points
-  soil_sub <- soil_points[, c("geometry", var)]
-  
-  # Convert to spatial object
-  soil_sp <- as(soil_sub, "Spatial")
-  
-  # Fit variogram and kriging model
-  vgm_model <- autofitVariogram(as.formula(paste(var, "~ 1")), soil_sp)
-  krige_result <- krige(as.formula(paste(var, "~ 1")), soil_sp, topo_rasters, model = vgm_model$var_model)
-  
-  # Convert kriged data to raster
-  r_kriged <- rast(krige_result)
-  names(r_kriged) <- var
-  
-  # Store in list
-  kriged_rasters[[var]] <- r_kriged
+# Create variogram model for each variable
+fit_variogram_model <- function(variable) {
+    # Create the formula
+    var_name <- as.formula(paste(variable, "~ 1"))
+    
+    # Calculate the variogram
+    vgm_data <- variogram(var_name, data = soil_points)
+    
+    # Fit the variogram model
+    vgm_model <- fit.variogram(vgm_data, model = vgm("Gau", psill = 1, range = 300, nugget = 0))
+    
+    # Return the fitted model
+    return(list(variable = variable, vgm_data = vgm_data, vgm_model = vgm_model))
 }
+
+# Fit variogram models for each variable
+variogram_models <- lapply(soil_vars, fit_variogram_model)
+
+
+# Create a function to perform kriging for each variable
+perform_kriging <- function(variable, vgm_model) {
+    # Create a prediction grid
+    grid <- st_as_sf(st_make_grid(soil_points, cellsize = 10), crs = st_crs(soil_points))
+    
+    # Perform kriging
+    kriging_result <- krige(formula = as.formula(paste(variable, "~ 1")),
+                             locations = soil_points,
+                             newdata = grid,
+                             model = vgm_model)
+    
+    # Return the kriging result
+    return(kriging_result)
+}
+
+# Perform kriging for each variable using the fitted variogram models
+kriging_results <- lapply(variogram_models, function(model) {
+    perform_kriging(model$variable, model$vgm_model)
+})
 
 ```
 
 #RF
 ```{r DSM method}
-# -------------------------------
-# RANDOM FOREST FOR SOIL VARIABLES
-# -------------------------------
 
-# Create empty list to store predicted rasters
-rf_rasters <- list()
-
-# Loop through soil variables
-for (var in soil_vars) {
-  # Get top correlated topo rasters
-  top_rasters <- get_top_correlated(var, corr_matrix, n = 3)
-  
-  # Extract raster values at soil sample points
-  extracted_data <- extract(topo_stack[[top_rasters]], soil_data)
-  
-  # Combine with soil values
-  model_data <- cbind(soil_data[var], extracted_data)
-  model_data <- na.omit(model_data)  # Remove NAs
-  
-  # Train Random Forest model
-  rf_model <- randomForest(as.formula(paste(var, "~ .")), data = model_data, ntree = 500)
-  
-  # Predict across the study area
-  pred_raster <- predict(topo_stack[[top_rasters]], rf_model)
-  names(pred_raster) <- var
-  
-  # Store in list
-  rf_rasters[[var]] <- pred_raster
-}
-
-# Stack all RF-predicted rasters
-rf_stack <- do.call(c, rf_rasters)
-
-# Save RF raster stack
-writeRaster(rf_stack, "rf_soil_stack.tif", overwrite = TRUE)
 ```
 #Classification
 ```{r Classification}
+
+
+#K
+classify_K <- function(K) {
+  case_when(
+    K <= 60  ~ "Low K (0-60 lbs/A)",    
+    K <= 150 ~ "Medium K (61-150 lbs/A)",  
+    K <= 250 ~ "High K (151-250 lbs/A)",  
+    K > 250  ~ "Very High K (250+ lbs/A)"
+  )
+}
+#P
+classify_P <- function(P) {
+  case_when(
+    P <= 30  ~ "Low P (0-30 lbs/A)",
+    P <= 60  ~ "Medium P (31-60 lbs/A)",
+    P <= 100 ~ "High P (61-100 lbs/A)",
+    P > 100  ~ "Very High P (100+ lbs/A)"
+  )
+}
+
+#pH
+classify_pH <- function(pH, LBC) {
+  lime_table <- read.csv("lime_requirements.csv")  # Make sure this table is structured properly
+  required_lime <- lime_table %>%
+    filter(pH == round(pH, 1)) %>%
+    select(as.character(LBC)) %>%
+    pull()
+
+  return(required_lime)
+}
+
+
+#Mg
+classify_Mg <- function(Mg) {
+  case_when(
+    Mg <= 30  ~ "Low Mg - Apply Dolomitic Lime",
+    Mg <= 60  ~ "Medium Mg - No Extra Mg Needed",
+    Mg > 60   ~ "High Mg - No Supplement Needed"
+  )
+}
+#Zn
+classify_Zn <- function(Zn) {
+  if (Zn < 3) {
+    return("Apply 3 lbs Zn/Acre")
+  } else {
+    return("No Zn Needed")
+  }
+}
 
 ```
 #Condense
@@ -548,6 +584,24 @@ writeRaster(rf_stack, "rf_soil_stack.tif", overwrite = TRUE)
 ```
 
 
+
+
+
+```{r pH: extra stuff}
+
+# Convert sf to sp
+soil_points_sp <- as(soil_points, "Spatial")
+
+# Compute the empirical variogram for pH
+emp_variogram <- variogram(soil_points_sp$pH.2 ~ 1, soil_points_sp)
+
+# Fit a model to the variogram
+var_model <- fit.variogram(emp_variogram, vgm(c("Sph", "Exp", "Gau")))
+
+# Plot the variogram
+plot(emp_variogram, model = var_model)
+
+```
 
 
 

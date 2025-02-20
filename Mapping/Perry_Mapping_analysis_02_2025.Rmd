@@ -31,6 +31,7 @@ library(sp)
 library(gstat)
 library(raster)
 library(automap)
+library(tmap)
 ```
 
 
@@ -73,64 +74,6 @@ soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, 
 
 ```
 
-```{r Bare Soil}
-#planet bare soil imagery: 
-bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
-bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
-bare_soil_res1 <- resample(bare_soil, USGS_DEM)
-
-
-# SURFACE REFLECTANCE:
-
-reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Bands 1-4 
-                             2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
-
-# Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
-surface_reflectance <- bare_soil
-for (i in 1:nlyr(bare_soil)) { #for every band, multiply value by its band coefficient
-  surface_reflectance[[i]] <- bare_soil[[i]] * reflectanceCoefficients[i]
-}
-
-# Save new SR
-writeRaster(surface_reflectance, "Output/Bare_soil/SR.tif", overwrite = TRUE)
-
-  # Plot random band:
-plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
-plot(bare_soil[[7]])
-
-```
-
-```{r NDVI}
-
-# Veg data: Planet 
-Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
-Vegstack_wgs84 <- project(Vegstack, "EPSG:4326", method = "bilinear")
-
-#NDVI:
-
-
-NIR <- Vegstack_wgs84[[8]]  # NIR band
-Red <- Vegstack_wgs84[[6]]  # Red band
-
-# formula
-NDVI <- (NIR - Red) / (NIR + Red)
-
-# Plot NDVI
-plot(NDVI)
-
-
-#SAVI: 
-
-
-L <- 0.5  # adjustable
-
-# formula
-SAVI <- ((NIR - Red) / (NIR + Red + L)) * (1 + L)
-
-# Plot SAVI
-plot(SAVI)
-
-```
 
 
 ```{r 1m DEM}
@@ -174,6 +117,81 @@ summary(clipped_stack)
 
 ```
 
+```{r Bare Soil}
+#planet bare soil imagery: 
+bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
+#bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
+bare_soil_utm <- project(bare_soil,clipped_stack)
+#bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
+
+
+
+# SURFACE REFLECTANCE:
+
+reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Bands 1-4 
+                             2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
+
+# Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
+surface_reflectance <- bare_soil_res1
+for (i in 1:nlyr(bare_soil_res1)) { #for every band, multiply value by its band coefficient
+surface_reflectance[[i]] <- bare_soil_res1[[i]] * reflectanceCoefficients[i]
+}
+
+# Save new SR
+writeRaster(surface_reflectance, "Output/Bare_soil/SR.tif", overwrite = TRUE)
+
+  # Plot random band:
+plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
+plot(bare_soil_res1[[7]])
+
+SR_names<-array(dim = nlyr(surface_reflectance))
+
+for (i in 1:nlyr(surface_reflectance)){
+  SR_names[i]<-paste0("bare_soil_SR_band_",i)
+}
+
+names(surface_reflectance)<-SR_names
+
+```
+
+```{r NDVI}
+
+# Veg data: Planet 
+Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
+
+Vegstack_utm <- project(bare_soil,clipped_stack)
+
+
+#NDVI:
+
+
+NIR <- Vegstack_utm[[8]]  # NIR band
+Red <- Vegstack_utm[[6]]  # Red band
+
+# formula
+NDVI <- (NIR - Red) / (NIR + Red)
+
+names(NDVI)<- "NDVI"
+
+# Plot NDVI
+plot(NDVI)
+
+
+#SAVI: 
+
+
+L <- 0.5  # adjustable
+
+# formula
+SAVI <- ((NIR - Red) / (NIR + Red + L)) * (1 + L)
+
+names(SAVI)<- "SAVI"
+
+
+# Plot SAVI
+plot(SAVI)
+
+```
 
 ```{r 1m rasters, eval = FALSE}
 
@@ -252,6 +270,11 @@ clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, vect(border))
 
 
 ##Data Wrangling
+```{r}
+covariates <- c(surface_reflectance, clipped_stack, NDVI, SAVI)
+
+names(covariates) <- make.names(names(covariates))
+```
 
 
 
@@ -283,6 +306,7 @@ SAVI_1m <- resample(SAVI, USGS_DEM_wgs84, method = "bilinear")
 #confirm with res()
 ```
 
+
 ```{r Clipping Dataset, eval = FALSE }
 
 
@@ -297,22 +321,11 @@ clipped_SR <- mask(surface_reflectance_1m, vect(border))
 
 ```
 
-```{r SNAP}
+```{r vect}
 
-# Convert soil points to raster
-soil_raster <- rasterize(vect(soil_points), topo_rasters[[1]], field = 1)
-soil_raster_clipped <- crop(soil_raster, border, mask = TRUE)
 
-# snap func
-snap_to_soil <- function(r) {
-  resample(r, soil_raster_clipped , method = "bilinear")
-}
-
-# Apply snapping to all pre-aligned rasters?
-snapped_rasters <- lapply(aligned_rasters, snap_to_soil)
-
-# Convert back to stack
-snapped_stack <- rast(snapped_rasters)
+# vect the sample data
+soil_points_vect <- vect(soil_points)
 
 ```
 
@@ -322,7 +335,7 @@ snapped_stack <- rast(snapped_rasters)
 soil_points_vect <- vect(soil_points)
 
 # Snap the points to the raster: (confirming each point is within the raster grid)
-snapped_points <- terra::extract(clipped_aspect_wgs84, soil_points_vect, method = "bilinear", small = TRUE)
+soil_points_extract <- terra::extract(covariates, soil_points_vect)
 
 # Combine snapped points with their corresponding properties
 soil_points$snapped_value <- snapped_points
@@ -355,21 +368,21 @@ ggplot() +
 
 ```{r Organizing}
 # Extract raster values at soil sample points
-extracted_raster_values <- extract(snapped_stack, soil_points, xy = FALSE)
-
-# Convert to a data frame
-raster_df <- as.data.frame(extracted_raster_values)
+soil_points_all <- terra::extract(covariates, soil_points_vect, bind = T,xy = T)
 
 
-soil_df <- soil_points %>%
-  st_drop_geometry() %>%
-  as.data.frame()  # Convert to a plain data frame
+#convert to df
+soils_df <- as.data.frame(soil_points_all)
 
-# Select only the desired columns explicitly using base R
-soil_df <- soil_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
 
-# Merge extracted raster values with soil data
-combined_df <- cbind(soil_df, raster_df)
+# Select only the desired columns
+soil_df_cols <- soils_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
+
+
+#exclude non essential data:
+soils_df_wrang <- soils_df[ ,-(1:9)]
+
+
 ```
 
 
@@ -377,7 +390,7 @@ combined_df <- cbind(soil_df, raster_df)
 ##Correlation Matrix
 ```{r Cor() }
 # Compute correlation matrix
-cor_matrix <- cor(combined_df, use = "pairwise.complete.obs", method = "spearman")
+cor_matrix <- cor(soils_df_wrang, use = "pairwise.complete.obs", method = "spearman")
 
 ```
 
@@ -396,17 +409,17 @@ ggcorrplot(cor_matrix, type = "lower",
            tl.srt = 45,           
            hc.order = TRUE, # Cluster similar variables together
            insig = "blank", # Hide insignificant correlations
-           p.mat = cor_pmat(combined_df)
+           p.mat = cor_pmat(soils_df_wrang)
            ) # Rotate axis labels
 
 
 # col name of soil properties
-soil_vars <- colnames(soil_df)
+soil_vars <- colnames(soil_df_cols)
 # topo name list
-topo_vars <- setdiff(colnames(combined_df), soil_vars)
+topo_vars <- setdiff(colnames(soils_df_wrang), soil_vars)
 
 # Compute correlation matrix only between soil properties and topo rasters
-cor_matrix_soil_topo <- cor(combined_df[, soil_vars], combined_df[, topo_vars], 
+cor_matrix_soil_topo <- cor(soils_df_wrang[, soil_vars], soils_df_wrang[, topo_vars], 
                             use = "pairwise.complete.obs", method = "spearman")
 
 # Visualize
@@ -419,6 +432,8 @@ ggcorrplot(cor_matrix_soil_topo, lab = TRUE, show.legend = TRUE,
 #scatterplot
 
 
+
+ggsave("../Mapping/Output/Correlation_Matrix_1.png")
 
 ```
 
@@ -464,13 +479,143 @@ ggcorrplot(cor_matrix_buffer, type = "lower", lab = TRUE, show.legend = TRUE)
 #select correlated rasters and soil properties:
 
 # Function to extract top correlated rasters
-get_top_correlated <- function(soil_vars, cor_matrix, n = 3) {
-  top_vars <- names(sort(abs(cor_matrix[soil_var, ]), decreasing = TRUE)[1:n])
-  return(top_vars)
+#get_top_correlated <- function(soil_vars, cor_matrix, n = 3) {
+#  topo_vars <- names(sort(abs(cor_matrix[soil_var, ]), decreasing = TRUE)[1:n])
+#  return(topo_vars)
+#}
+
+cor_matrix_soil_topo_t <- t(cor_matrix_soil_topo)
+
+cor_sort<-list()
+
+for (i in 1:ncol(cor_matrix_soil_topo_t)) {
+  col_sort<-sort(abs(cor_matrix_soil_topo_t[,i]),decreasing = T)
+  cor_sort[[i]]<-col_sort
 }
+
+cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
+
+view(cor_sort_wrang)
+
+#get_top_correlated()
+
+```
+#RF
+```{r DSM method}
+library(caret)
+
+set.seed(10)
+
+LBC_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn'))
+
+LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
+
+LBC_df_train <- LBC_df[LBC_index_train,]
+LBC_df_test <- LBC_df[-LBC_index_train,]
+
+trainControl <- trainControl(method = "cv", number = 5)
+
+LBC_rf <- train(LBC.1 ~ ., data = LBC_df_train, method = "rf", trControl = trainControl)
+
+print(LBC_rf)
+
+LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
+
+plot(LBC_predict)
+
+LBCeq_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn'))
+
+LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
+
+LBC_df_train <- LBC_df[LBC_index_train,]
+LBC_df_test <- LBC_df[-LBC_index_train,]
+
+trainControl <- trainControl(method = "cv", number = 5)
+
+LBC_rf <- train(LBC.1 ~ ., data = LBC_df_train, method = "rf", trControl = trainControl)
+
+print(LBC_rf)
+
+LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
+
+plot(LBC_predict)
 ```
 
+
 #Kriging
+```{r Kriging}
+grid<-as.points(covariates)
+
+plot(grid)
+
+grid_sf <- st_as_sf(grid)
+
+grid_sp <- as_Spatial(grid_sf)
+
+soil_points_sf <- st_as_sf(soil_points_all)
+
+soil_points_sp <- as_Spatial(soil_points_sf)
+
+LBC_var<-variogram(LBC.1~1,data = soil_points_sp)
+
+plot(LBC_var)
+
+LBC_varfit<-fit.variogram(LBC_var, model = vgm("Sph"))
+
+plot(LBC_var, LBC_varfit)
+
+LBC_kriged<-krige(LBC.1~1,soil_points_sp,grid_sp,model = LBC_varfit)
+
+LBC_kriged_sf<-st_as_sf(LBC_kriged)
+
+LBC_kriged_spat<-vect(LBC_kriged_sf)
+
+LBC_kriged_raster<-rasterize(LBC_kriged_spat,covariates, field="var1.pred")
+
+plot(LBC_kriged_raster)
+
+P_var<-variogram(P~1,data = soil_points_sp)
+
+plot(P_var)
+
+P_varfit<-fit.variogram(P_var, model = vgm("Sph"))
+
+plot(P_var, P_varfit)
+
+P_kriged<-krige(P~1,soil_points_sp,grid_sp,model = P_varfit)
+
+P_kriged_sf<-st_as_sf(P_kriged)
+
+P_kriged_spat<-vect(P_kriged_sf)
+
+P_kriged_raster<-rasterize(P_kriged_spat,covariates, field="var1.pred")
+
+plot(P_kriged_raster)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ```{r PA method}
 # Create variogram model for each variable
 fit_variogram_model <- function(variable) {
@@ -513,10 +658,12 @@ kriging_results <- lapply(variogram_models, function(model) {
 
 ```
 
-#RF
-```{r DSM method}
+
+```{r stack}
 
 ```
+
+
 #Classification
 ```{r Classification}
 
@@ -530,6 +677,8 @@ classify_K <- function(K) {
     K > 250  ~ "Very High K (250+ lbs/A)"
   )
 }
+
+
 #P
 classify_P <- function(P) {
   case_when(
@@ -539,6 +688,14 @@ classify_P <- function(P) {
     P > 100  ~ "Very High P (100+ lbs/A)"
   )
 }
+library(tidyterra)
+P_kriged_raster %>%
+  mutate(P_class = case_when(
+    P <= 30  ~ "Low P (0-30 lbs/A)",
+    P <= 60  ~ "Medium P (31-60 lbs/A)",
+    P <= 100 ~ "High P (61-100 lbs/A)",
+    P > 100  ~ "Very High P (100+ lbs/A)"))
+
 
 #pH
 classify_pH <- function(pH, LBC) {

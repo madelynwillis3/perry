@@ -36,14 +36,7 @@ library(tmap)
 
 
 ##Pulling Data/Imagery
-```{r AOI}
-#FYI: USING WGS 84 as it is what GEE uses.
 
-#Grabbing geojson border shapefile:
-border <- st_read("Data/Border/Border_json.geojson")
-#aoi <- sf_as_ee(border) #open back up when on laptop
-
-```
 
 ```{r Soil Samples}
 #NOTE: I am currently using the AESL samples taken in 2024, all composite samples taken at a 4 acre grid scale.
@@ -62,17 +55,7 @@ soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, 
 ```
 
 
-```{r LANDSAT}
-#GEE:
 
-#filtering geojson by AOI:
-#image_collection <- ee$ImageCollection("LANDSAT/LC08/C01/T1_SR")$
-#  filterBounds(aoi)
-
-#grabbing bands from LANDSAT8: 
-#image_banding <- image_collection$select(c('B2', 'B3', 'B4', 'B5', 'B6', 'B7'))
-
-```
 
 
 
@@ -122,8 +105,8 @@ summary(clipped_stack)
 bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
 #bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
 bare_soil_utm <- project(bare_soil,clipped_stack)
-bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
-
+#bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
+bare_soil_res1 <- project(bare_soil,clipped_stack)
 
 
 # SURFACE REFLECTANCE:
@@ -278,48 +261,10 @@ names(covariates) <- make.names(names(covariates))
 
 
 
-```{r Rescaling Planet Data, eval = FALSE} 
-#NOT WORKING :(
-
-#ALL PLANET DATA MUST BE RESCALED TO MATCH DEM (1m) DATA
-    #I will be using USGS_DEM_wgs84 for this
-
-#Bare_soil:
-
-bare_soil_1m <- resample(rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif"), USGS_DEM_wgs84, method = "bilinear")
-
-#SR:
-
-surface_reflectance_1m <- resample(surface_reflectance, USGS_DEM_wgs84, method = "bilinear")
-
-#NDVI:
-
-NDVI_1m <- resample(NDVI, USGS_DEM_wgs84, method = "bilinear")
-
-
-#Other planet data:
-
-  #SAVI:
-SAVI_1m <- resample(SAVI, USGS_DEM_wgs84, method = "bilinear")
-
-
-#confirm with res()
-```
-
-
-```{r Clipping Dataset, eval = FALSE }
-
-
-#Bare soil
-clipped_bare_soil <- mask(bare_soil, vect(border))
-
-#SR
-clipped_SR <- mask(surface_reflectance_1m, vect(border))
 
 
 
 
-```
 
 ```{r vect}
 
@@ -329,39 +274,7 @@ soil_points_vect <- vect(soil_points)
 
 ```
 
-```{r Data Snapping, eval = FALSE }
 
-# vect the sample data
-soil_points_vect <- vect(soil_points)
-
-# Snap the points to the raster: (confirming each point is within the raster grid)
-soil_points_extract <- terra::extract(covariates, soil_points_vect)
-
-# Combine snapped points with their corresponding properties
-soil_points$snapped_value <- snapped_points
-
-
-# Convert the raster to a data frame
-raster_df <- as.data.frame(clipped_aspect_wgs84, xy = TRUE, na.rm = TRUE)
-
-#name column layer
-colnames(raster_df)[3] <- "layer"  
-
-# Plot 
-ggplot() +
-  # Raster layer
-  geom_raster(data = raster_df, aes(x = x, y = y, fill = layer)) +
-  scale_fill_viridis_c() + #color friendly 
-  # Soil points layer
-  geom_sf(data = soil_points, aes(color = "red"), size = 2) + 
-  theme_minimal() +
-  theme(legend.position = "none")
-
-
-
-
-
-```
 
 
 
@@ -437,52 +350,14 @@ ggsave("../Mapping/Output/Correlation_Matrix_1.png")
 
 ```
 
-```{r corr buffer test, eval=FALSE, include=FALSE}
-# Step 1: Create a buffer around soil points
-buffer_distance_m <- 104.35 * 0.3048  # Convert feet to meters
-soil_buffers <- st_buffer(soil_points, dist = buffer_distance_m)
 
-# Step 2: Extract raster values from the buffers
-extracted_raster_values_buffer <- extract(snapped_stack, soil_buffers, xy = FALSE)
 
-# Convert to a data frame
-raster_df_buffer <- as.data.frame(extracted_raster_values_buffer)
-
-# Step 3: Select relevant soil data columns
-soil_df <- soil_points %>%
-  st_drop_geometry() %>%
-  as.data.frame()  # Convert to a plain data frame
-
-# Select only the desired columns explicitly using base R
-soil_df <- soil_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
-
-# Merge extracted raster values with soil data
-combined_df_buffer <- cbind(soil_df, raster_df_buffer)
-
-# Step 4: Compute the correlation matrix
-cor_matrix_buffer <- cor(combined_df_buffer, use = "pairwise.complete.obs", method = "spearman")
-
-# Print the correlation matrix
-print(cor_matrix_buffer)
-
-# Optionally, visualize correlations with a heatmap
-library(ggcorrplot)
-ggcorrplot(cor_matrix_buffer, type = "lower", lab = TRUE, show.legend = TRUE)
-
-```
 
 
 
 
 #Stack Results
 ```{r Stack data }
-#select correlated rasters and soil properties:
-
-# Function to extract top correlated rasters
-#get_top_correlated <- function(soil_vars, cor_matrix, n = 3) {
-#  topo_vars <- names(sort(abs(cor_matrix[soil_var, ]), decreasing = TRUE)[1:n])
-#  return(topo_vars)
-#}
 
 cor_matrix_soil_topo_t <- t(cor_matrix_soil_topo)
 
@@ -496,7 +371,6 @@ for (i in 1:ncol(cor_matrix_soil_topo_t)) {
 cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 
 
-#get_top_correlated()
 
 ```
 
@@ -504,6 +378,7 @@ cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 #RF
 ```{r DSM method}
 library(caret)
+
 
 set.seed(10)
 
@@ -617,47 +492,7 @@ plot(P_kriged_raster)
 
 
 
-```{r PA method, eval - FALSE}
-# Create variogram model for each variable
-fit_variogram_model <- function(variable) {
-    # Create the formula
-    var_name <- as.formula(paste(variable, "~ 1"))
-    
-    # Calculate the variogram
-    vgm_data <- variogram(var_name, data = soil_points)
-    
-    # Fit the variogram model
-    vgm_model <- fit.variogram(vgm_data, model = vgm("Gau", psill = 1, range = 300, nugget = 0))
-    
-    # Return the fitted model
-    return(list(variable = variable, vgm_data = vgm_data, vgm_model = vgm_model))
-}
 
-# Fit variogram models for each variable
-variogram_models <- lapply(soil_vars, fit_variogram_model)
-
-
-# Create a function to perform kriging for each variable
-perform_kriging <- function(variable, vgm_model) {
-    # Create a prediction grid
-    grid <- st_as_sf(st_make_grid(soil_points, cellsize = 10), crs = st_crs(soil_points))
-    
-    # Perform kriging
-    kriging_result <- krige(formula = as.formula(paste(variable, "~ 1")),
-                             locations = soil_points,
-                             newdata = grid,
-                             model = vgm_model)
-    
-    # Return the kriging result
-    return(kriging_result)
-}
-
-# Perform kriging for each variable using the fitted variogram models
-kriging_results <- lapply(variogram_models, function(model) {
-    perform_kriging(model$variable, model$vgm_model)
-})
-
-```
 
 
 ```{r stack}

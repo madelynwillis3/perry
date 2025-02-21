@@ -383,7 +383,7 @@ library(caret)
 set.seed(10)
 
 LBC_df <- soils_df_wrang %>%
-  dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn'))
+  dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
 LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
 
@@ -395,6 +395,10 @@ trainControl <- trainControl(method = "cv", number = 5)
 LBC_rf <- train(LBC.1 ~ ., data = LBC_df_train, method = "rf", trControl = trainControl)
 
 print(LBC_rf)
+
+predictors(LBC_rf)
+
+names(covariates)
 
 LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
 

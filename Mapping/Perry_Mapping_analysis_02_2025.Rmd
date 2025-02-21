@@ -122,7 +122,7 @@ summary(clipped_stack)
 bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
 #bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
 bare_soil_utm <- project(bare_soil,clipped_stack)
-#bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
+bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
 
 
 
@@ -495,11 +495,12 @@ for (i in 1:ncol(cor_matrix_soil_topo_t)) {
 
 cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 
-view(cor_sort_wrang)
 
 #get_top_correlated()
 
 ```
+
+
 #RF
 ```{r DSM method}
 library(caret)
@@ -616,7 +617,7 @@ plot(P_kriged_raster)
 
 
 
-```{r PA method}
+```{r PA method, eval - FALSE}
 # Create variogram model for each variable
 fit_variogram_model <- function(variable) {
     # Create the formula

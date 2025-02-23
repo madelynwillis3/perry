@@ -1071,7 +1071,7 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 #Clean Maps
 ```{r Clean Up Maps}
 #Clean up into distinct management zones FOR use by farmers
-
+# hi yes
 # Resample to lower resolution by aggregating
 # by a factor of
 factor <- 12

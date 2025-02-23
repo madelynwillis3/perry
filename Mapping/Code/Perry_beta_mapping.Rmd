@@ -205,3 +205,71 @@ print(cor_matrix_buffer)
 library(ggcorrplot)
 ggcorrplot(cor_matrix_buffer, type = "lower", lab = TRUE, show.legend = TRUE)
 ```
+
+
+```{r testing}
+#in ppm unit:
+
+#P
+classify_P <- function(P) {
+  case_when(
+    P <= 15  ~ "Low P (0-30 lbs/A)",
+    P <= 30  ~ "Medium P (31-60 lbs/A)",
+    P <= 50 ~ "High P (61-100 lbs/A)",
+    P > 50  ~ "Very High P (100+ lbs/A)"
+  )
+}
+
+#K
+classify_K <- function(K) {
+  case_when(
+    K <= 30  ~ "Low K (0-60 lbs/A)",    
+    K <= 75 ~ "Medium K (61-150 lbs/A)",  
+    K <= 125 ~ "High K (151-250 lbs/A)",  
+    K > 125  ~ "Very High K (250+ lbs/A)"
+  )
+}
+
+
+# Function to classify rasters
+classify_raster <- function(raster, classify_function) {
+  as.factor(classify_function(values(raster))) |> 
+    rast(ext(raster), res(raster), crs(raster))
+}
+
+
+P_predict_rast <- terra::is.factor(P_predict)
+# Classify P and K rasters
+rf_P_classified <- classify_raster(P_predict_rast, classify_P)
+rf_K_classified <- classify_raster(K_predict, classify_K)
+krig_P_classified <- classify_raster(P_kriged_raster, classify_P)
+krig_K_classified <- classify_raster(K_kriged_raster, classify_K)
+
+
+# Plot to check classifications
+plot(rf_classified_stack, main = c("RF Classified P", "RF Classified K"))
+plot(krig_classified_stack, main = c("Kriging Classified P", "Kriging Classified K"))
+
+
+# Add classified rasters to a new stack
+rf_classified_stack <- c(rf_P_classified, rf_K_classified)
+krig_classified_stack <- c(krig_P_classified, krig_K_classified)
+
+```
+
+
+```{r pH: extra stuff}
+
+# Convert sf to sp
+soil_points_sp <- as(soil_points, "Spatial")
+
+# Compute the empirical variogram for pH
+emp_variogram <- variogram(soil_points_sp$pH.2 ~ 1, soil_points_sp)
+
+# Fit a model to the variogram
+var_model <- fit.variogram(emp_variogram, vgm(c("Sph", "Exp", "Gau")))
+
+# Plot the variogram
+plot(emp_variogram, model = var_model)
+
+```

@@ -352,6 +352,22 @@ ggcorrplot(cor_matrix_soil_topo, lab = TRUE, show.legend = TRUE,
 
 ggsave("../Mapping/Output/Correlation_Matrix_1.png")
 
+
+#P ONLY
+
+# Exclude "x" and "y" from topo_vars
+topo_vars_filtered_P <- topo_vars[!topo_vars %in% c("x", "y","Normalized.Height","Standardized.Height","bare_soil_SR_band_1","Mid.Slope.Positon","bare_soil_SR_band_2" ,"bare_soil_SR_band_3","Topographic.Position.Index","viz.USGS1m_aspect","SAVI","NDVI","viz.USGS1m_color.relief_1","Terrain.Ruggedness.Index..TRI.","viz.USGS1m_color.relief_2","viz.USGS1m_hillshade.color_1","bare_soil_SR_band_4","Slope.Height","Topographic.Wetness.Index","MRVBF","viz.USGS1m_hillshade","viz.USGS1m_roughness","viz.USGS1m_hillshade.color_2" )]
+
+# Compute correlation matrix only between soil properties (keeping only P) and filtered topo rasters
+cor_matrix_P <- cor(soils_df_wrang[, c("P"), drop = FALSE], soils_df_wrang[, topo_vars_filtered_P], 
+                             use = "pairwise.complete.obs", method = "spearman")
+
+# Visualize
+ggcorrplot(cor_matrix_P, lab = TRUE, show.legend = TRUE, 
+           tl.cex = 5, lab_size = 1.5, tl.srt = 45, method = "square")
+ggsave("../Mapping/Output/Correlation_Matrix_P.png", dpi = 300)
+
+
 ```
 
 
@@ -384,7 +400,7 @@ cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 library(caret)
 
 #seed:
-set.seed(10)
+set.seed(626)
 
 #set train control:
 trainControl <- trainControl(method = "cv", number = 5)
@@ -537,7 +553,7 @@ P_df_train <- P_df[P_index_train,]
 P_df_test <- P_df[-P_index_train,]
 
 
-P_rf <- train(P ~ ., data = P_df_train, method = "rf", trControl = trainControl)
+P_rf <- train(P~ ., data = P_df_train, method = "rf", trControl = trainControl)
 
 print(P_rf)
 
@@ -546,6 +562,21 @@ predictors(P_rf)
 P_predict <- terra::predict(covariates, P_rf, na.rm=TRUE)
 
 plot(P_predict)
+
+
+#p adjusted with points
+P_predict_adjusted <- P_predict
+
+soil_points_sf <- st_as_sf(soil_points_all, coords = c("x", "y"), crs = st_crs(covariates))
+
+coords <- st_coordinates(soil_points_sf)
+P_predict_adjusted[terra::cellFromXY(P_predict, coords)] <- soil_points_sf$P
+
+plot(P_predict_adjusted)
+
+
+
+
 
 #Zn:
 
@@ -790,7 +821,7 @@ plot(Zn_kriged_raster)
 
 #RF:
 
-rf_stack <- c(LBC_predict, pH_predict, Ca_predict, K_predict, Mg_predict, Mn_predict, P_predict, Zn_predict )
+rf_stack <- c(LBC_predict, pH_predict, Ca_predict, K_predict, Mg_predict, Mn_predict, P_predict, Zn_predict)
 
 #Kriging:
 krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_raster, Mg_kriged_raster, Mn_kriged_raster, P_kriged_raster, Zn_kriged_raster)
@@ -801,7 +832,7 @@ krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_
 #Classification
 
 ```{r classify P and K }
-
+library(terra)
 # Define breaks and corresponding labels for Phosphorus (in ppm)
 P_classes <- c(0, 15, 30, 50, Inf)  # Breakpoints
 P_labels <- c(1, 2, 3, 4)  # Assign numeric labels
@@ -823,12 +854,24 @@ P_kriged_classified <- classify(P_kriged_raster, P_class_matrix)
 K_predict_classified <- classify(K_predict, K_class_matrix)
 K_kriged_classified <- classify(K_kriged_raster, K_class_matrix)
 
+#"Low P (0-30 lbs/A)" Apply 140 lbs of P205 per acre
+#"Medium P (31-60 lbs/A)" Apply 105 lbs of P205 per acre
+#"High P (61-100 lbs/A)" Apply 75 lbs of P205 per acre
+#"Very High P (100+ lbs/A)" Apply 0 lbs of P205 per acre
 
-# Assign category labels
-P_labels_factor <- c("Low P (0-30 lbs/A)", "Medium P (31-60 lbs/A)", 
-                     "High P (61-100 lbs/A)", "Very High P (100+ lbs/A)")
-K_labels_factor <- c("Low K (0-60 lbs/A)", "Medium K (61-150 lbs/A)", 
-                     "High K (151-250 lbs/A)", "Very High K (250+ lbs/A)")
+#""Low K (0-60 lbs/A)"Apply 180 lbs of K2O per acre
+#"Medium K (61-150 lbs/A)" Apply 140 lbs of K2O per acre
+#"High K (151-250 lbs/A)"Apply 120 lbs of K2O per acre
+#"Very High K (250+ lbs/A)" Apply 0 lbs of K2O per acre
+
+
+# Assign category labels  for P:
+P_labels_factor <- c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre",
+                     "Apply 75 lbs of P205 per acre", "Apply 0 lbs of P205 per acre")
+
+#for K:
+K_labels_factor <- c("Apply 180 lbs of K2O per acre", "Apply 140 lbs of K2O per acre", 
+                     "Apply 120 lbs of K2O per acre", "Apply 0 lbs of K2O per acre")
 
 # Convert rasters to categorical factors
 levels(P_predict_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
@@ -848,9 +891,36 @@ plot(P_kriged_classified, main = "Classified P (Kriging)")
 plot(K_kriged_classified, main = "Classified K (Kriging)")
 
 
-
 ```
 
+```{r classify P adjusted}
+library(terra)
+
+# Classify P rasters #P adjusted is just forcing the soil points in
+P_predict_classified_adjust <- classify(P_predict_adjusted, P_class_matrix)
+
+
+#"Low P (0-30 lbs/A)" Apply 140 lbs of P205 per acre
+#"Medium P (31-60 lbs/A)" Apply 105 lbs of P205 per acre
+#"High P (61-100 lbs/A)" Apply 75 lbs of P205 per acre
+#"Very High P (100+ lbs/A)" Apply 0 lbs of P205 per acre
+
+
+
+# Assign category labels  for P:
+
+# Convert rasters to categorical factors
+levels(P_predict_classified_adjust) <- data.frame(ID = 1:4, category = P_labels_factor)
+levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
+
+
+#RF
+plot(P_predict_classified_adjust, main = "Classified P (RF Prediction)")
+
+
+
+
+```
 
 ```{r pH}
 
@@ -1066,10 +1136,8 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 #flatten all soil nutrients together into ONE map per method (RF and kriging)
 ```
 
-
-
-#Clean Maps
-```{r Clean Up Maps}
+#clean maps
+```{r LBC}
 #Clean up into distinct management zones FOR use by farmers
 # hi yes
 # Resample to lower resolution by aggregating
@@ -1105,9 +1173,7 @@ lime_df_low_res$cluster <- kmeans_result_low_res$cluster
 
 # Create a new raster for the zones based on low resolution
 zone_raster_low_res <- lime_rf_low_res  # Start with the low-res raster
-zone_values_low_res <- rep(NA, ncell(zone_raster_low_res))  # Initialize a vector for zone values
-
-# Assign cluster values to the new raster
+zone_values_low_res <- rep(NA, ncell(zone_raster_low_res))  # Initialize a vector for zone values nkthe new raster
 zone_values_low_res[lime_df_low_res$pixel_id] <- lime_df_low_res$cluster
 
 # Update the zone raster with the cluster values
@@ -1117,15 +1183,144 @@ zone_raster_low_res[] <- zone_values_low_res
 plot(zone_raster_low_res, main = "Management Zones for pH (Clustered)", col = terrain.colors(num_clusters_low_res))
 
 
+
 ```
+
+
+#P
+```{r plot P values}
+
+
+
+```
+
+#Clean Maps
+```{r Clean Up Maps P}
+library(terra)
+library(raster)
+library(viridis)
+
+# Step 1: Aggregate while preserving the modal classification
+P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact=12, fun=modal, expand=TRUE)
+
+# Step 2: Set 0 as NoData (mask it out)
+P_rf_agg[P_rf_agg == 0] <- NA
+
+# Step 3: Convert to raster format (for clumping)
+P_rf_agg_raster <- raster::raster(P_rf_agg)
+
+# Step 4: Clump (group connected cells)
+#P_rf_clumped <- raster::clump(P_rf_agg_raster, directions=4)
+
+# Step 5: Sieve (remove small isolated groups)
+P_rf_sieved <- terra::sieve(P_rf_agg, threshold=40)
+
+# Step 6: Reclassify values to match labels
+classify_P <- matrix(c(1, 1, 2, 2), ncol=2, byrow=TRUE)
+P_rf_final <- terra::classify(P_rf_sieved, classify_P)
+
+# Step 7: Assign category labels
+P_rf_final <- terra::as.factor(P_rf_final)
+levels(P_rf_final) <- data.frame(ID = c(1,2), 
+                                 Class = c("Apply 140 lbs of P205 per acre", 
+                                           "Apply 105 lbs of P205 per acre"))
+
+# Step 8: Save the cleaned raster
+#terra::writeRaster(P_rf_final, "P_RF_cleaned.tif", format="GTiff", overwrite=TRUE)
+
+# Define custom colors using viridis palette
+custom_colors <- viridis(4, option="D")[c(1, 2)]  # Ensures 105 lbs is teal
+
+# Step 9: Plot with correct classification
+plot(P_rf_final, main="Random Forest Model of P2O5 Recommendations for Corn", 
+     col=custom_colors, legend=FALSE)
+
+# Add legend inside the map
+legend("topright", legend=c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre"), 
+       fill=custom_colors,  inset = c(.07, 0),title="P Recommendation", bty="n", cex=0.5)
+
+```
+
+
+```{r P clustering}
+
+library(terra)
+
+# 1. Aggregate (Optional: Only if you want to reduce resolution)
+# Example: Aggregate by a factor of 2 (adjust as needed)
+P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact= 15, fun=modal, expand=TRUE)
+
+# 2. Clump: Identify connected regions with the same value
+P_rf_clumped <- raster::clump(raster::raster(P_rf_agg), directions=8)  # Uses 8-direction connectivity
+
+# 3. Sieve: Remove small isolated clumps (e.g., smaller than 5 cells)
+P_rf_sieved <- terra::sieve(P_rf_agg, threshold=25)
+
+# 4. Save the cleaned raster
+#terra::writeRaster(P_rf_sieved, "P_RF_cleaned.tif", format="GTiff", overwrite=TRUE)
+
+# 5. Plot to check the results
+plot(P_rf_sieved, main="Cleaned RF Map (Aggregated, Clumped, and Sieved)")
+
+```
+
+
+
 
 ```{r Compare Maps}
-#results
+library(terra)
+library(viridis)
+
+
+
+# Define custom viridis colors for classification (same across all maps)
+custom_colors <- viridis(4, option = "D")
+
+# Assign category labels for P
+P_labels_factor <- c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre",
+                     "Apply 75 lbs of P205 per acre", "Apply 0 lbs of P205 per acre")
+
+# Assign category labels for K
+K_labels_factor <- c("Apply 180 lbs of K2O per acre", "Apply 140 lbs of K2O per acre", 
+                     "Apply 120 lbs of K2O per acre", "Apply 0 lbs of K2O per acre")
+
+# Create separate plots for each raster with legends outside
+
+# Plot RF classified P
+
+plot(P_predict_classified_adjust, main = "Random Forest Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=P_labels_factor, fill=custom_colors, 
+       title="P Recommendation", bty="n", cex=0.5)  # Smaller text 
+
+
+
+# Plot RF classified K
+plot(K_predict_classified, main = "Random Forest Model of K2O Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=K_labels_factor, fill=custom_colors, 
+       title="K Recommendation", bty="n", cex=0.5)  # Smaller text
+
+# Plot Kriged classified P
+plot(P_kriged_classified, main = "Kriging Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=P_labels_factor, fill=custom_colors, 
+       title="P Recommendation", bty="n", cex=0.5)  # Smaller text
+
+# Plot Kriged classified K
+plot(K_kriged_classified, main = "Kriging Model of K2O Recommendations for Corn)", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=K_labels_factor, fill=custom_colors, 
+       title="K Recommendation", bty="n", cex=0.5)  # Smaller text
+
 ```
 
 
 
 
+```{r export classified P RF }
+# Export the raster as a .tif file
+terra::writeRaster(P_predict_classified_adjust, 
+                   filename = "../Mapping/Output/GIS maps/P_RF_map.tif", 
+                   overwrite = TRUE)
+
+```
 
 
 

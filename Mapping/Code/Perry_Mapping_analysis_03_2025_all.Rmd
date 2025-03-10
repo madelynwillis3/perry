@@ -1,0 +1,1133 @@
+---
+title: "Perry_analysis"
+author: "Madelyn Willis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+##Unloading Necessary Packages
+```{r Packages, include=FALSE}
+#chunk options
+knitr::opts_chunk$set(echo = TRUE)
+
+    #libraries
+#library(reticulate)
+#library(rgee)
+#ee_Authenticate()
+#ee_Initialize()
+library(sf)
+library(tidyverse)
+library(raster)
+library(terra)
+library(ggplot2)
+library(viridis)
+library(corrr)
+library(rstac)
+library(ggcorrplot)
+library(GGally)
+library(randomForest)
+library(sf)
+library(sp)
+library(gstat)
+library(raster)
+library(automap)
+library(tmap)
+```
+
+
+##Pulling Data/Imagery
+
+
+```{r Soil Samples}
+#NOTE: I am currently using the AESL samples taken in 2024, all composite samples taken at a 4 acre grid scale.
+
+#Grabbing Sample ID's
+soil_points <- st_read("Data/Samples/Composite_Odds_17N.shp")
+
+
+#CSV of AESL data:
+soil_C_4ac <- read.csv("Data/Samples/Perry_Composite_4ac.csv")
+
+# Merge points + sample data:
+soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, since we only have composite data back so far.
+
+
+```
+
+
+
+
+
+
+```{r 1m DEM}
+
+# Load the USGS 1m DEM (acts as the template)
+USGS_DEM <- rast("Data/USGS DEM/DEM rasters/output_USGS1m.tif")
+
+# border:
+border <- vect("Data/Border/border_17N.shp")
+
+# Crop and mask the DEM to the border extent
+clipped_DEM <- crop(USGS_DEM, border) |> mask(border)
+
+# Load all topographic rasters
+topo_files <- list.files("Data/all rasters/", full.names = TRUE)
+topo_rasters <- lapply(topo_files, rast)
+
+# Function to align rasters (clip first, then resample to 1m)
+align_raster <- function(r, template, border) {
+  # Reproject raster
+  if (crs(r) != crs(template)) {
+    r <- project(r, crs(template), method = "bilinear")
+  }
+  # Resample to match the clipped DEM's resolution
+  r <- resample(r, template, method = "bilinear")
+  # Crop and mask to the border FIRST
+  r <- crop(r, border) |> mask(border)
+
+  return(r)
+}
+
+# Align all rasters
+aligned_rasters <- lapply(topo_rasters, align_raster, template = clipped_DEM, border = border)
+
+# Stack aligned rasters
+clipped_stack <- rast(aligned_rasters)
+
+# Summary check
+summary(clipped_stack)
+
+
+```
+
+```{r Bare Soil}
+#planet bare soil imagery: 
+bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
+#bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
+bare_soil_utm <- project(bare_soil,clipped_stack)
+#bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
+bare_soil_res1 <- project(bare_soil,clipped_stack)
+
+
+# SURFACE REFLECTANCE:
+
+reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Bands 1-4 
+                             2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
+
+# Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
+surface_reflectance <- bare_soil_res1
+for (i in 1:nlyr(bare_soil_res1)) { #for every band, multiply value by its band coefficient
+surface_reflectance[[i]] <- bare_soil_res1[[i]] * reflectanceCoefficients[i]
+}
+
+# Save new SR
+writeRaster(surface_reflectance, "Output/Bare_soil/SR.tif", overwrite = TRUE)
+
+  # Plot random band:
+plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
+plot(bare_soil_res1[[7]])
+
+SR_names<-array(dim = nlyr(surface_reflectance))
+
+for (i in 1:nlyr(surface_reflectance)){
+  SR_names[i]<-paste0("bare_soil_SR_band_",i)
+}
+
+names(surface_reflectance)<-SR_names
+
+```
+
+```{r NDVI}
+
+# Veg data: Planet 
+Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
+
+Vegstack_utm <- project(bare_soil,clipped_stack)
+
+
+#NDVI:
+
+
+NIR <- Vegstack_utm[[8]]  # NIR band
+Red <- Vegstack_utm[[6]]  # Red band
+
+# formula
+NDVI <- (NIR - Red) / (NIR + Red)
+
+names(NDVI)<- "NDVI"
+
+# Plot NDVI
+plot(NDVI)
+
+
+#SAVI: 
+
+
+L <- 0.5  # adjustable
+
+# formula
+SAVI <- ((NIR - Red) / (NIR + Red + L)) * (1 + L)
+
+names(SAVI)<- "SAVI"
+
+
+# Plot SAVI
+plot(SAVI)
+
+```
+
+```{r 1m rasters, eval = FALSE}
+
+#Visualizations via OpenTopography:
+aspect <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
+#aspect_wgs84 <- project(aspect, "EPSG:4326",res = 1, method = "bilinear")
+clipped_aspect <- mask(aspect, vect(border))
+plot(clipped_aspect)
+
+color_relief <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
+color_relief_wgs84 <- project(color_relief, "EPSG:4326",res = 1, method = "bilinear")
+clipped_color_relief_wgs84 <- mask(color_relief_wgs84, vect(border))
+
+color_hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
+color_hillshade_wgs84 <- project(color_hillshade, "EPSG:4326",res = 1, method = "bilinear")
+clipped_color_hillshade_wgs84 <- mask(color_hillshade_wgs84, vect(border))
+
+hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
+hillshade_wgs84 <- project(hillshade, "EPSG:4326",res = 1, method = "bilinear")
+clipped_hillshade_wgs84 <- mask(hillshade_wgs84, vect(border))
+
+roughness <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
+roughness_wgs84 <- project(roughness, "EPSG:4326",res = 1, method = "bilinear")
+clipped_roughness_wgs84 <- mask(roughness_wgs84, vect(border))
+
+slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
+slope_wgs84 <- project(slope, "EPSG:4326",res = 1, method = "bilinear")
+clipped_slope_wgs84 <- mask(slope_wgs84, vect(border))
+
+
+#SAGA visualizations:
+slope_height <-rast("Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
+slope_height_wgs84 <- project(slope_height, "EPSG:4326",res = 1, method = "bilinear")
+clipped_slope_height_wgs84 <- mask(slope_height_wgs84, vect(border))
+
+valley_depth <-rast("Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
+valley_depth_wgs84 <- project(valley_depth, "EPSG:4326",res = 1, method = "bilinear")
+clipped_valley_depth_wgs84 <- mask(valley_depth_wgs84, vect(border))
+
+norm_height <-rast("Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
+norm_height_wgs84 <- project(norm_height, "EPSG:4326",res = 1, method = "bilinear")
+clipped_norm_height_wgs84 <- mask(norm_height_wgs84, vect(border))
+
+std_height <-rast("Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
+std_height_wgs84 <- project(std_height, "EPSG:4326",res = 1, method = "bilinear")
+clipped_std_height_wgs84 <- mask(std_height_wgs84, vect(border))
+
+mid_slope_pos <-rast("Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
+mid_slope_pos_wgs84 <- project(mid_slope_pos, "EPSG:4326",res = 1, method = "bilinear")
+clipped_mid_slope_pos_wgs84 <- mask(mid_slope_pos_wgs84, vect(border))
+
+topo_pos_index <-rast("Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
+topo_pos_index_wgs84 <- project(topo_pos_index, "EPSG:4326",res = 1, method = "bilinear")
+clipped_topo_pos_index_wgs84 <- mask(topo_pos_index_wgs84, vect(border))
+
+topo_wet_index <-rast("Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
+topo_wet_index_wgs84 <- project(topo_wet_index, "EPSG:4326",res = 1, method = "bilinear")
+clipped_topo_wet_index_wgs84 <- mask(topo_wet_index_wgs84, vect(border))
+
+terr_rugged_index <-rast("Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
+terr_rugged_index_wgs84 <- project(terr_rugged_index, "EPSG:4326",res = 1, method = "bilinear")
+clipped_terr_rugged_index_wgs84 <- mask(terr_rugged_index_wgs84, vect(border))
+
+mrvbf <-rast("Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
+mrvbf_wgs84 <- project(mrvbf, "EPSG:4326",res = 1, method = "bilinear")
+clipped_mrvbf_wgs84 <- mask(mrvbf_wgs84, vect(border))
+
+mrrtf <-rast("Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
+mrrtf_wgs84 <- project(mrrtf, "EPSG:4326",res = 1, method = "bilinear")
+clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, vect(border))
+
+
+```
+
+
+
+
+##Data Wrangling
+```{r}
+
+
+
+covariates <- c(surface_reflectance, clipped_stack, NDVI, SAVI)
+
+
+names(covariates) <- make.names(names(covariates))
+```
+
+
+
+
+
+
+
+
+```{r vect}
+
+
+# vect the sample data
+soil_points_vect <- vect(soil_points)
+
+```
+
+
+
+
+
+
+```{r Organizing for CM}
+# Extract raster values at soil sample points
+soil_points_all <- terra::extract(covariates, soil_points_vect, bind = T,xy = T)
+
+
+#convert to df
+soils_df <- as.data.frame(soil_points_all)
+
+
+# Select only the desired columns
+soil_df_cols <- soils_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
+
+
+#exclude non essential data:
+soils_df_wrang <- soils_df[ ,-(1:9)]
+
+
+```
+
+
+
+##Correlation Matrix
+```{r CM }
+# Compute correlation matrix
+cor_matrix <- cor(soils_df_wrang, use = "pairwise.complete.obs", method = "spearman")
+
+```
+
+```{r plotting CM }
+#formatting:
+ggcorrplot(cor_matrix, type = "lower", 
+           lab = TRUE, show.legend = TRUE, 
+           tl.cex = 4, # Adjust text size
+           lab_size = 2, # Adjust correlation label size
+           tl.srt = 45) # Rotate axis labels
+
+ggcorrplot(cor_matrix, type = "lower", 
+           lab = TRUE, show.legend = TRUE, 
+           tl.cex = 4, # Adjust text size
+           lab_size = 2, # Adjust correlation label size
+           tl.srt = 45,           
+           hc.order = TRUE, # Cluster similar variables together
+           insig = "blank", # Hide insignificant correlations
+           p.mat = cor_pmat(soils_df_wrang)
+           ) # Rotate axis labels
+
+
+# col name of soil properties
+soil_vars <- colnames(soil_df_cols)
+# topo name list
+topo_vars <- setdiff(colnames(soils_df_wrang), soil_vars)
+
+# Compute correlation matrix only between soil properties and topo rasters
+cor_matrix_soil_topo <- cor(soils_df_wrang[, soil_vars], soils_df_wrang[, topo_vars], 
+                            use = "pairwise.complete.obs", method = "spearman")
+
+# Visualize
+ggcorrplot(cor_matrix_soil_topo, lab = TRUE, show.legend = TRUE, 
+           tl.cex = 5, lab_size = 2, tl.srt = 45, method = "circle")
+
+
+
+
+#scatterplot
+
+
+
+ggsave("../Mapping/Output/Correlation_Matrix_1.png")
+
+```
+
+
+
+
+
+
+
+#Stack Results
+```{r Stack data }
+
+cor_matrix_soil_topo_t <- t(cor_matrix_soil_topo)
+
+cor_sort<-list()
+
+for (i in 1:ncol(cor_matrix_soil_topo_t)) {
+  col_sort<-sort(abs(cor_matrix_soil_topo_t[,i]),decreasing = T)
+  cor_sort[[i]]<-col_sort
+}
+
+cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
+
+
+
+```
+
+
+#RF
+```{r DSM method}
+library(caret)
+
+#seed:
+set.seed(10)
+
+#set train control:
+trainControl <- trainControl(method = "cv", number = 5)
+
+
+#LBC: 
+
+LBC_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
+
+LBC_df_train <- LBC_df[LBC_index_train,]
+LBC_df_test <- LBC_df[-LBC_index_train,]
+
+
+LBC_rf <- train(LBC.1 ~ ., data = LBC_df_train, method = "rf", trControl = trainControl)
+
+print(LBC_rf)
+
+predictors(LBC_rf)
+
+LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
+
+plot(LBC_predict)
+
+
+
+
+#pH
+
+pH_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+pH_index_train <- caret::createDataPartition(pH_df$pH.2, p = .8, list = F)
+
+pH_df_train <- pH_df[pH_index_train,]
+pH_df_test <- pH_df[-pH_index_train,]
+
+
+
+pH_rf <- train(pH.2 ~ ., data = pH_df_train, method = "rf", trControl = trainControl)
+
+print(pH_rf)
+
+predictors(pH_rf)
+
+
+pH_predict <- terra::predict(covariates, pH_rf, na.rm=TRUE)
+
+plot(pH_predict)
+
+
+
+#Ca:
+Ca_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+Ca_index_train <- caret::createDataPartition(Ca_df$Ca, p = .8, list = F)
+
+Ca_df_train <- Ca_df[Ca_index_train,]
+Ca_df_test <- Ca_df[-Ca_index_train,]
+
+
+Ca_rf <- train(Ca ~ ., data = Ca_df_train, method = "rf", trControl = trainControl)
+
+print(Ca_rf)
+
+predictors(Ca_rf)
+
+
+Ca_predict <- terra::predict(covariates, Ca_rf, na.rm=TRUE)
+
+plot(Ca_predict)
+
+
+
+#K:
+
+K_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+K_index_train <- caret::createDataPartition(K_df$K, p = .8, list = F)
+
+K_df_train <- K_df[K_index_train,]
+K_df_test <- K_df[-K_index_train,]
+
+
+K_rf <- train(K ~ ., data = K_df_train, method = "rf", trControl = trainControl)
+
+print(K_rf)
+
+predictors(K_rf)
+
+K_predict <- terra::predict(covariates, K_rf, na.rm=TRUE)
+
+plot(K_predict)
+
+
+#Mg:
+
+Mg_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
+
+Mg_index_train <- caret::createDataPartition(Mg_df$Mg, p = .8, list = F)
+
+Mg_df_train <- Mg_df[Mg_index_train,]
+Mg_df_test <- Mg_df[-Mg_index_train,]
+
+
+Mg_rf <- train(Mg ~ ., data = Mg_df_train, method = "rf", trControl = trainControl)
+
+print(Mg_rf)
+
+predictors(Mg_rf)
+
+Mg_predict <- terra::predict(covariates, Mg_rf, na.rm=TRUE)
+
+plot(Mg_predict)
+
+#Mn:
+
+Mn_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
+
+Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
+
+Mn_df_train <- Mn_df[Mn_index_train,]
+Mn_df_test <- Mn_df[-Mn_index_train,]
+
+
+Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
+
+print(Mn_rf)
+
+predictors(Mn_rf)
+
+Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
+
+plot(Mn_predict)
+
+#P:
+
+P_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'Zn','x','y'))
+
+P_index_train <- caret::createDataPartition(P_df$P, p = .8, list = F)
+
+P_df_train <- P_df[P_index_train,]
+P_df_test <- P_df[-P_index_train,]
+
+
+P_rf <- train(P ~ ., data = P_df_train, method = "rf", trControl = trainControl)
+
+print(P_rf)
+
+predictors(P_rf)
+
+P_predict <- terra::predict(covariates, P_rf, na.rm=TRUE)
+
+plot(P_predict)
+
+#Zn:
+
+Zn_df <- soils_df_wrang %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P','x','y'))
+
+Zn_index_train <- caret::createDataPartition(Zn_df$Zn, p = .8, list = F)
+
+Zn_df_train <- Zn_df[Zn_index_train,]
+Zn_df_test <- Zn_df[-Zn_index_train,]
+
+
+Zn_rf <- train(Zn ~ ., data = Zn_df_train, method = "rf", trControl = trainControl)
+
+print(Zn_rf)
+
+predictors(Zn_rf)
+
+Zn_predict <- terra::predict(covariates, Zn_rf, na.rm=TRUE)
+
+plot(Zn_predict)
+
+
+
+
+```
+
+
+#Kriging
+```{r Kriging}
+
+#setting grid as points for kriging
+grid<-as.points(covariates)
+
+  #plot(grid)
+#set to sf format
+grid_sf <- st_as_sf(grid)
+
+grid_sp <- as_Spatial(grid_sf)
+
+soil_points_sf <- st_as_sf(soil_points_all)
+
+soil_points_sp <- as_Spatial(soil_points_sf)
+
+#LBC
+
+LBC_var<-variogram(LBC.1~1,data = soil_points_sp)
+
+LBC_varfit<-fit.variogram(LBC_var, model = vgm("Nug")) #nugget- reassess with full data
+
+plot(LBC_var, LBC_varfit)
+
+LBC_kriged<-krige(LBC.1~1,soil_points_sp,grid_sp,model = LBC_varfit)
+
+LBC_kriged_sf<-st_as_sf(LBC_kriged)
+
+LBC_kriged_spat<-vect(LBC_kriged_sf)
+
+LBC_kriged_raster<-rasterize(LBC_kriged_spat,covariates, field="var1.pred")
+
+plot(LBC_kriged_raster)
+
+
+#P
+
+P_var<-variogram(P~1,data = soil_points_sp)
+
+#plot(P_var)
+
+P_varfit<-fit.variogram(P_var, model = vgm("Sph"))
+
+plot(P_var, P_varfit)
+
+P_kriged<-krige(P~1,soil_points_sp,grid_sp,model = P_varfit)
+
+P_kriged_sf<-st_as_sf(P_kriged)
+
+P_kriged_spat<-vect(P_kriged_sf)
+
+P_kriged_raster<-rasterize(P_kriged_spat,covariates, field="var1.pred")
+
+plot(P_kriged_raster)
+
+
+#pH:
+pH_var<-variogram(pH.2~1,data = soil_points_sp)
+
+#plot(pH_var)
+
+pH_varfit<-fit.variogram(pH_var, model = vgm("Sph"))
+
+plot(pH_var, pH_varfit)
+
+pH_kriged<-krige(pH.2~1,soil_points_sp,grid_sp,model = pH_varfit)
+
+pH_kriged_sf<-st_as_sf(pH_kriged)
+
+pH_kriged_spat<-vect(pH_kriged_sf)
+
+pH_kriged_raster<-rasterize(pH_kriged_spat,covariates, field="var1.pred")
+
+plot(pH_kriged_raster)
+
+
+
+
+#Ca:
+Ca_var<-variogram(Ca~1,data = soil_points_sp)
+
+#plot(Ca_var)
+
+Ca_varfit<-fit.variogram(Ca_var, model = vgm("Sph"))
+
+plot(Ca_var, Ca_varfit)
+
+Ca_kriged<-krige(Ca~1,soil_points_sp,grid_sp,model = Ca_varfit)
+
+Ca_kriged_sf<-st_as_sf(Ca_kriged)
+
+Ca_kriged_spat<-vect(Ca_kriged_sf)
+
+Ca_kriged_raster<-rasterize(Ca_kriged_spat,covariates, field="var1.pred")
+
+plot(Ca_kriged_raster)
+
+
+
+#K:
+
+K_var<-variogram(K~1,data = soil_points_sp)
+
+plot(K_var)
+
+K_varfit<-fit.variogram(K_var, model = vgm("Exp"))
+
+plot(K_var, K_varfit)
+
+K_kriged<-krige(K~1,soil_points_sp,grid_sp,model = K_varfit)
+
+K_kriged_sf<-st_as_sf(K_kriged)
+
+K_kriged_spat<-vect(K_kriged_sf)
+
+K_kriged_raster<-rasterize(K_kriged_spat,covariates, field="var1.pred")
+
+plot(K_kriged_raster)
+
+
+
+#Mg
+Mg_var<-variogram(Mg~1,data = soil_points_sp)
+
+plot(Mg_var)
+
+Mg_varfit<-fit.variogram(Mg_var, model = vgm("Nug")) #nugget- reassess with full data
+
+plot(Mg_var, Mg_varfit)
+
+Mg_kriged<-krige(Mg~1,soil_points_sp,grid_sp,model = Mg_varfit)
+
+Mg_kriged_sf<-st_as_sf(Mg_kriged)
+
+Mg_kriged_spat<-vect(Mg_kriged_sf)
+
+Mg_kriged_raster<-rasterize(Mg_kriged_spat,covariates, field="var1.pred")
+
+plot(Mg_kriged_raster)
+
+
+#Mn:
+
+Mn_var<-variogram(Mn~1,data = soil_points_sp)
+
+plot(Mn_var)
+
+Mn_varfit<-fit.variogram(Mn_var, model = vgm("Exp")) 
+
+plot(Mn_var, Mn_varfit)
+
+Mn_kriged<-krige(Mn~1,soil_points_sp,grid_sp,model = Mn_varfit)
+
+Mn_kriged_sf<-st_as_sf(Mn_kriged)
+
+Mn_kriged_spat<-vect(Mn_kriged_sf)
+
+Mn_kriged_raster<-rasterize(Mn_kriged_spat,covariates, field="var1.pred")
+
+plot(Mn_kriged_raster)
+
+
+#Zn:
+
+Zn_var<-variogram(Zn~1,data = soil_points_sp)
+
+plot(Zn_var)
+
+Zn_varfit<-fit.variogram(Zn_var, model = vgm("Exp"))
+
+plot(Zn_var, Zn_varfit)
+
+Zn_kriged<-krige(Zn~1,soil_points_sp,grid_sp,model = Zn_varfit)
+
+Zn_kriged_sf<-st_as_sf(Zn_kriged)
+
+Zn_kriged_spat<-vect(Zn_kriged_sf)
+
+Zn_kriged_raster<-rasterize(Zn_kriged_spat,covariates, field="var1.pred")
+
+plot(Zn_kriged_raster)
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##stack
+```{r stack}
+#stack every soil variable map together for RF and kriging methods:
+
+#RF:
+
+rf_stack <- c(LBC_predict, pH_predict, Ca_predict, K_predict, Mg_predict, Mn_predict, P_predict, Zn_predict )
+
+#Kriging:
+krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_raster, Mg_kriged_raster, Mn_kriged_raster, P_kriged_raster, Zn_kriged_raster)
+
+```
+
+
+#Classification
+
+```{r classify P and K }
+
+# Define breaks and corresponding labels for Phosphorus (in ppm)
+P_classes <- c(0, 15, 30, 50, Inf)  # Breakpoints
+P_labels <- c(1, 2, 3, 4)  # Assign numeric labels
+
+# Define breaks and corresponding labels for Potassium (in ppm)
+K_classes <- c(0, 30, 75, 125, Inf)  # Breakpoints
+K_labels <- c(1, 2, 3, 4)  # Assign numeric labels
+
+# Create classification matrices
+P_class_matrix <- cbind(P_classes[-length(P_classes)], P_classes[-1], P_labels)
+K_class_matrix <- cbind(K_classes[-length(K_classes)], K_classes[-1], K_labels)
+
+
+# Classify P rasters
+P_predict_classified <- classify(P_predict, P_class_matrix)
+P_kriged_classified <- classify(P_kriged_raster, P_class_matrix)
+
+# Classify K rasters
+K_predict_classified <- classify(K_predict, K_class_matrix)
+K_kriged_classified <- classify(K_kriged_raster, K_class_matrix)
+
+
+# Assign category labels
+P_labels_factor <- c("Low P (0-30 lbs/A)", "Medium P (31-60 lbs/A)", 
+                     "High P (61-100 lbs/A)", "Very High P (100+ lbs/A)")
+K_labels_factor <- c("Low K (0-60 lbs/A)", "Medium K (61-150 lbs/A)", 
+                     "High K (151-250 lbs/A)", "Very High K (250+ lbs/A)")
+
+# Convert rasters to categorical factors
+levels(P_predict_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
+levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
+
+levels(K_predict_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
+levels(K_kriged_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
+
+par(mfrow = c(2,2))
+#RF
+plot(P_predict_classified, main = "Classified P (RF Prediction)")
+plot(K_predict_classified, main = "Classified K (RF Prediction)")
+
+
+#Kriging
+plot(P_kriged_classified, main = "Classified P (Kriging)")
+plot(K_kriged_classified, main = "Classified K (Kriging)")
+
+
+
+```
+
+
+```{r pH}
+
+# Create a lookup table for lime requirements (lbs/acre)
+lime_table <- tibble(
+  pH = c(5.9, 5.8, 5.7, 5.6, 5.5, 5.4, 5.3, 5.2),
+  LBC_100 = c(1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000),
+  LBC_200 = c(1000, 1000, 1000, 1000, 1000, 1500, 1500, 2000),
+  LBC_300 = c(1000, 1000, 1000, 1500, 2000, 2000, 2500, 3000),
+  LBC_400 = c(1000, 1000, 1500, 2000, 2500, 3000, 3500, 4000),
+  LBC_500 = c(1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000),
+  LBC_600 = c(1000, 1500, 2500, 3000, 3500, 4500, 5000, 5500),
+  LBC_700 = c(1000, 2000, 3000, 3500, 4000, 5000, 6000, 6500),
+  LBC_800 = c(1000, 2000, 3000, 4000, 5000, 5500, 6500, 7500),
+  LBC_900 = c(1000, 2500, 3500, 4500, 5500, 6500, 7500, 8500),
+  LBC_1000 = c(1500, 2500, 3500, 5000, 6000, 7000, 8500, 9500),
+  LBC_1100 = c(1500, 3000, 4000, 5500, 6500, 8000, 9000, 10000),
+  LBC_1200 = c(1500, 3000, 4500, 5500, 7000, 8500, 10000, 10000),
+  LBC_1300 = c(1500, 3500, 4500, 6000, 7500, 9000, 10000, 10000),
+  LBC_1400 = c(2000, 3500, 5000, 6500, 8500, 10000, 10000, 10000)
+)
+
+# Convert lbs/acre to ppm
+lime_table[-1] <- lime_table[-1] / 2  # Since 1 ppm ≈ 2 lbs/acre
+
+# Function to classify lime requirement
+classify_lime <- function(pH, LBC) {
+  if (is.na(pH) | is.na(LBC)) return(NA)  # If either value is NA, return NA
+  if (pH >= 6) return(0)  # No lime needed if pH is already ≥ 6
+
+  # Find the closest matching pH row
+  pH_row <- lime_table %>% filter(pH == max(pH[pH <= pH], na.rm = TRUE)) 
+  
+  # Find the closest matching LBC column
+  LBC_col <- paste0("LBC_", min(max(100, round(LBC, -2)), 1400))  # Rounds to nearest 100
+  
+  return(as.numeric(pH_row[[LBC_col]]))  # Extract the correct lime value in ppm
+}
+
+
+# Apply to rasters
+LBC_pH_stack <- c(LBC_predict, pH_predict)  # Stack LBC and pH for RF results
+LBC_pH_kriged_stack <- c(LBC_kriged_raster, pH_kriged_raster)  # Stack for kriging results
+
+lime_rf <- app(LBC_pH_stack, fun = function(x) classify_lime(x[2], x[1]))  # x[2] = pH, x[1] = LBC
+lime_kriged <- app(LBC_pH_kriged_stack, fun = function(x) classify_lime(x[2], x[1]))
+
+# Rename for clarity
+names(lime_rf) <- "Lime_Requirement_RF"
+names(lime_kriged) <- "Lime_Requirement_Kriged"
+
+
+
+# Plot results
+plot(lime_rf, main = "Lime Requirement (RF)")
+plot(lime_kriged, main = "Lime Requirement (Kriged)")
+
+# Save outputs
+#writeRaster(lime_rf, "../Mapping/Output/Lime_Requirement_RF.tif", overwrite = TRUE)
+#writeRaster(lime_kriged, "../Mapping/Output/Lime_Requirement_Kriged.tif", overwrite = TRUE)
+```
+
+
+```{r Mg}
+classify_Mg_numeric <- function(Mg, pH) {
+  if (is.na(Mg) | is.na(pH)) return(NA)  # Handle missing values
+
+  Mg_low <- 30 / 2  # in ppm
+  Mg_medium <- 60 / 2  # in ppm
+
+  if (Mg < Mg_low) {
+    if (pH < 6) {
+      return(1)  # Low Mg - Use Dolomitic Limestone
+    } else {
+      return(2)  # Low Mg - Apply 25 lbs Mg/Acre
+    }
+  } else if (Mg < Mg_medium) {
+    return(3)  # Medium Mg
+  } else {
+    return(4)  # High Mg
+  }
+}
+
+library(parallel)
+
+# Define a wrapper function
+classify_wrapper <- function(Mg, pH) {
+  classify_Mg_numeric(Mg, pH)
+}
+
+# RF:
+Mg_rf_numeric <- terra::app(c(Mg_predict, pH_predict), 
+                             function(x) classify_wrapper(x[1], x[2]))
+
+# Kriging:
+Mg_kriged_numeric <- terra::app(c(Mg_kriged_raster, pH_kriged_raster), 
+                                 function(x) classify_wrapper(x[1], x[2]))
+
+# Create a lookup table
+Mg_categories <- data.frame(
+  ID = c(1, 2, 3, 4),
+  Mg_Class = c("Low Mg - Use Dolomitic Limestone",
+               "Low Mg - Apply 25 lbs Mg/Acre",
+               "Medium Mg",
+               "High Mg")
+)
+
+# Convert to categorical raster
+Mg_rf <- terra::as.factor(Mg_rf_numeric)
+levels(Mg_rf) <- Mg_categories
+
+Mg_kriged <- terra::as.factor(Mg_kriged_numeric)
+levels(Mg_kriged) <- Mg_categories
+
+# Plot results
+plot(Mg_rf, main = "Mg Applications (RF)")
+plot(Mg_kriged, main = "Mg Application (Kriged)")
+
+```
+
+
+```{r Mn, eval = FALSE}
+# Define Mn classification function
+classify_Mn <- function(Mn, pH) {
+  if (is.na(Mn) | is.na(pH)) return(NA)  # Handle missing values
+  
+  if (pH < 5.7 & Mn > 35) return(0)  # No Mn needed if Mn > 35 ppm and pH < 5.7
+
+  # Mn ranges (converted from lbs/acre to ppm)
+  Mn_ranges <- c(0, 1.1, 2.3, 3.5, 4.8, 6.0, 7.2, 8.4, 9.6, 10.8, 
+                 12.0, 13.3, 14.5, 15.7, 16.9, 18.1, Inf) / 2  # Convert to ppm
+  
+  pH_thresholds <- c(5.7, 5.8, 5.9, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 
+                     6.7, 6.8, 6.9, 7.0, 7.1, 7.2)  # Corresponding pH thresholds
+
+  # Find the correct pH threshold based on Mn value
+  for (i in seq_along(Mn_ranges)) {
+    if (Mn >= Mn_ranges[i] & Mn < Mn_ranges[i + 1]) {
+      return(ifelse(pH > pH_thresholds[i], 1, 0))  # Apply Mn if pH is too high
+    }
+  }
+
+  return(NA)  # Default NA
+}
+
+# Wrapper function for classify_Mn
+classify_wrapper <- function(vals) {
+  classify_Mn(vals[1], vals[2])
+}
+
+# Apply classification to raster stacks
+Mn_rf_numeric <- terra::app(c(Mn_predict, pH_predict), classify_wrapper, cores=4)
+Mn_kriged_numeric <- app(c(Mn_kriged_raster, pH_kriged_raster), classify_wrapper, cores=4)
+
+# Create a lookup table for categories
+Mn_categories <- data.frame(
+  ID = c(0, 1),
+  Mn_Class = c("No Mn Needed", "Apply Mn")
+)
+
+# Convert numeric values to categories for visualization
+Mn_rf <- ratify(Mn_rf_numeric)
+levels(Mn_rf) <- Mn_categories
+
+Mn_kriged <- ratify(Mn_kriged_numeric)
+levels(Mn_kriged) <- Mn_categories
+
+# Plot results
+par(mfrow = c(1, 2))  # Set up plotting area
+plot(Mn_rf, main = "Mn Classification (RF Prediction)")
+plot(Mn_kriged, main = "Mn Classification (Kriged)")
+
+
+```
+
+
+```{r Zn, }
+# Define breaks and corresponding labels for Zinc (in ppm)
+Zn_classes <- c(0, 1, 4, Inf)  # Breakpoints
+Zn_labels <- c(1, 2, 3)  # Assign numeric labels (for low, medium, adequate)
+
+# Create classification matrix
+Zn_class_matrix <- cbind(Zn_classes[-length(Zn_classes)], Zn_classes[-1], Zn_labels)
+
+# Classify Zn rasters
+Zn_predict_classified <- classify(Zn_predict, Zn_class_matrix)
+Zn_kriged_classified <- classify(Zn_kriged_raster, Zn_class_matrix)
+
+# Assign category labels for Zn
+Zn_labels_factor <- c("Low Zn (Apply 3 lbs Zn/acre)", 
+                      "Medium Zn  (No Zn Needed)", 
+                      "Adequate Zn (No Zn Needed)")
+
+# Convert Zn rasters to categorical factors
+levels(Zn_predict_classified) <- data.frame(ID = Zn_labels, category = Zn_labels_factor)
+levels(Zn_kriged_classified) <- data.frame(ID = Zn_labels, category = Zn_labels_factor)
+
+# Plot results
+par(mfrow = c(1, 2))  # Set up plotting area
+plot(Zn_predict_classified, main = "Zn Classification (RF Prediction)")
+plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
+
+```
+
+
+
+
+
+
+
+#Condense
+```{r Flatten Stacks}
+#flatten all soil nutrients together into ONE map per method (RF and kriging)
+```
+
+
+
+#Clean Maps
+```{r Clean Up Maps}
+#Clean up into distinct management zones FOR use by farmers
+
+# Resample to lower resolution by aggregating
+# by a factor of
+factor <- 12
+lime_rf_low_res <- aggregate(lime_rf, fact = factor, fun = mean, na.rm = TRUE)
+
+# Convert the low-resolution raster to a matrix for clustering
+lime_matrix_low_res <- as.matrix(lime_rf_low_res)
+
+# Reshape the matrix to have a two-column format: pixel index and value
+lime_df_low_res <- data.frame(
+  pixel_id = seq_len(ncell(lime_rf_low_res)),
+  value = as.vector(lime_matrix_low_res)
+)
+
+# Remove NAs from the data frame
+lime_df_low_res <- na.omit(lime_df_low_res)
+
+# Check the number of unique values
+num_unique_values_low_res <- length(unique(lime_df_low_res$value))
+cat("Number of unique values in low-res:", num_unique_values_low_res, "\n")
+
+# Set the number of clusters based on unique values, limiting to a maximum of 5
+num_clusters_low_res <- min(num_unique_values_low_res, 2)
+
+# Perform K-means clustering on the low-resolution data
+set.seed(626)  # Set seed for reproducibility
+kmeans_result_low_res <- kmeans(lime_df_low_res$value, centers = num_clusters_low_res)
+
+# Add cluster assignments back to the data frame
+lime_df_low_res$cluster <- kmeans_result_low_res$cluster
+
+# Create a new raster for the zones based on low resolution
+zone_raster_low_res <- lime_rf_low_res  # Start with the low-res raster
+zone_values_low_res <- rep(NA, ncell(zone_raster_low_res))  # Initialize a vector for zone values
+
+# Assign cluster values to the new raster
+zone_values_low_res[lime_df_low_res$pixel_id] <- lime_df_low_res$cluster
+
+# Update the zone raster with the cluster values
+zone_raster_low_res[] <- zone_values_low_res
+
+# Plot the management zones from the lower resolution raster
+plot(zone_raster_low_res, main = "Management Zones for pH (Clustered)", col = terrain.colors(num_clusters_low_res))
+
+
+```
+
+```{r Compare Maps}
+#results
+```
+
+
+
+
+
+
+
+
+

@@ -28,9 +28,10 @@ library(GGally)
 library(randomForest)
 library(sp)
 library(gstat)
-library(raster)
 library(automap)
 library(tmap)
+library(parallel)
+library(caret)
 ```
 
 
@@ -257,8 +258,8 @@ clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, border_ext)
 
 
 
-##Data Wrangling
-```{r}
+##RF
+```{r wrangling}
 
 
 #stack all
@@ -267,9 +268,11 @@ covariates <- c(surface_reflectance, clipped_stack, NDVI, SAVI)
 #make names valid
 names(covariates) <- make.names(names(covariates))
 
+#sort by SINGLE POINT DATA
+soil_points_singlepoint <- filter(soil_points, type == "SPID")
 
 # vect the sample data
-soil_points_vect <- vect(soil_points)
+soil_points_vect <- vect(soil_points_singlepoint)
 
 
 # Extract raster values at soil sample points
@@ -353,10 +356,8 @@ cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 ```
 
 
-#RF
-```{r DSM method}
-library(caret)
 
+```{r Random Forest method}
 #seed:
 set.seed(626)
 
@@ -670,7 +671,7 @@ K_var<-variogram(K~1,data = soil_points_sp)
 
 plot(K_var)
 
-K_varfit<-fit.variogram(K_var, model = vgm("Exp"))
+K_varfit<-fit.variogram(K_var, model = vgm("Sph"))
 
 plot(K_var, K_varfit)
 
@@ -691,7 +692,7 @@ Mg_var<-variogram(Mg~1,data = soil_points_sp)
 
 plot(Mg_var)
 
-Mg_varfit<-fit.variogram(Mg_var, model = vgm("Nug")) #nugget- reassess with full data
+Mg_varfit<-fit.variogram(Mg_var, model = vgm("Sph")) #was nugget, now sph
 
 plot(Mg_var, Mg_varfit)
 
@@ -712,7 +713,7 @@ Mn_var<-variogram(Mn~1,data = soil_points_sp)
 
 plot(Mn_var)
 
-Mn_varfit<-fit.variogram(Mn_var, model = vgm("Exp")) 
+Mn_varfit<-fit.variogram(Mn_var, model = vgm("Sph")) 
 
 plot(Mn_var, Mn_varfit)
 
@@ -727,13 +728,13 @@ Mn_kriged_raster<-rasterize(Mn_kriged_spat,covariates, field="var1.pred")
 plot(Mn_kriged_raster)
 
 
-#Zn:
+#Zn: NO spatial autocorrelation.
 
 Zn_var<-variogram(Zn~1,data = soil_points_sp)
 
 plot(Zn_var)
 
-Zn_varfit<-fit.variogram(Zn_var, model = vgm("Exp"))
+Zn_varfit<-fit.variogram(Zn_var, model = vgm("Nug")) #none
 
 plot(Zn_var, Zn_varfit)
 
@@ -745,7 +746,7 @@ Zn_kriged_spat<-vect(Zn_kriged_sf)
 
 Zn_kriged_raster<-rasterize(Zn_kriged_spat,covariates, field="var1.pred")
 
-plot(Zn_kriged_raster)
+plot(Zn_kriged_raster, main = "Zn kriged")
 
 
 
@@ -793,13 +794,21 @@ krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_
 
 ```{r classify P}
 
+
+#"Low P (0-30 lbs/A)" Apply 140 lbs of P205 per acre
+#"Medium P (31-60 lbs/A)" Apply 105 lbs of P205 per acre
+#"High P (61-100 lbs/A)" Apply 75 lbs of P205 per acre
+#"Very High P (100+ lbs/A)" Apply 0 lbs of P205 per acre
+
+
+
 # Define breaks and corresponding labels for Phosphorus (in ppm)
 P_classes <- c(0, 15, 30, 50, Inf)  # Breakpoints
 P_labels <- c(1, 2, 3, 4)  # Assign numeric labels
 
 # Create classification matrices
 P_class_matrix <- cbind(P_classes[-length(P_classes)], P_classes[-1], P_labels)
-K_class_matrix <- cbind(K_classes[-length(K_classes)], K_classes[-1], K_labels)
+
 
 
 # Classify P rasters
@@ -810,8 +819,7 @@ P_kriged_classified <- classify(P_kriged_raster, P_class_matrix)
 # Assign category labels
 P_labels_factor <- c("Low P (0-30 lbs/A)", "Medium P (31-60 lbs/A)", 
                      "High P (61-100 lbs/A)", "Very High P (100+ lbs/A)")
-K_labels_factor <- c("Low K (0-60 lbs/A)", "Medium K (61-150 lbs/A)", 
-                     "High K (151-250 lbs/A)", "Very High K (250+ lbs/A)")
+
 
 # Convert rasters to categorical factors
 levels(P_predict_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
@@ -821,27 +829,17 @@ levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
 par(mfrow = c(2,2))
 #RF
 plot(P_predict_classified, main = "Classified P (RF Prediction)")
-plot(K_predict_classified, main = "Classified K (RF Prediction)")
+
 
 
 #Kriging
 plot(P_kriged_classified, main = "Classified P (Kriging)")
 
+#adjusted P
 
-
-
-```
-```{r classify P adjusted}
-library(terra)
 
 # Classify P rasters #P adjusted is just forcing the soil points in
 P_predict_classified_adjust <- classify(P_predict_adjusted, P_class_matrix)
-
-
-#"Low P (0-30 lbs/A)" Apply 140 lbs of P205 per acre
-#"Medium P (31-60 lbs/A)" Apply 105 lbs of P205 per acre
-#"High P (61-100 lbs/A)" Apply 75 lbs of P205 per acre
-#"Very High P (100+ lbs/A)" Apply 0 lbs of P205 per acre
 
 
 
@@ -850,7 +848,6 @@ P_predict_classified_adjust <- classify(P_predict_adjusted, P_class_matrix)
 # Convert rasters to categorical factors
 levels(P_predict_classified_adjust) <- data.frame(ID = 1:4, category = P_labels_factor)
 levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
-
 
 #RF
 plot(P_predict_classified_adjust, main = "Classified P (RF Prediction)")
@@ -961,7 +958,7 @@ classify_Mg_numeric <- function(Mg, pH) {
   }
 }
 
-library(parallel)
+
 
 # Define a wrapper function
 classify_wrapper <- function(Mg, pH) {
@@ -1095,7 +1092,6 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 
 ```{r P clustering}
 
-library(terra)
 
 # 1. Aggregate (Optional: Only if you want to reduce resolution)
 # Example: Aggregate by a factor of 2 (adjust as needed)
@@ -1169,9 +1165,7 @@ plot(zone_raster_low_res, main = "Management Zones for pH (Clustered)", col = te
 
 
 ```{r Clean Up Maps P}
-library(terra)
-library(raster)
-library(viridis)
+
 
 # Step 1: Aggregate while preserving the modal classification
 P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact=12, fun=modal, expand=TRUE)
@@ -1217,7 +1211,7 @@ legend("topright", legend=c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of 
 
 ```{r P clustering}
 
-library(terra)
+
 
 # 1. Aggregate (Optional: Only if you want to reduce resolution)
 # Example: Aggregate by a factor of 2 (adjust as needed)
@@ -1241,8 +1235,7 @@ plot(P_rf_sieved, main="Cleaned RF Map (Aggregated, Clumped, and Sieved)")
 
 
 ```{r Compare Maps}
-library(terra)
-library(viridis)
+
 
 
 

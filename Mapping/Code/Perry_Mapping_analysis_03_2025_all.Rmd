@@ -26,7 +26,6 @@ library(rstac)
 library(ggcorrplot)
 library(GGally)
 library(randomForest)
-library(sf)
 library(sp)
 library(gstat)
 library(raster)
@@ -39,17 +38,17 @@ library(tmap)
 
 
 ```{r Soil Samples}
-#NOTE: I am currently using the AESL samples taken in 2024, all composite samples taken at a 4 acre grid scale.
 
 #Grabbing Sample ID's
-soil_points <- st_read("Data/Samples/Composite_Odds_17N.shp")
-
+soil_points <- st_read("../Data/Samples/Perry_all points_17N/all_samples_points_perry_2.shp") %>%
+  pivot_longer(cols = c("CID","SPID"), names_to ="type", values_to = "ID")
+  
 
 #CSV of AESL data:
-soil_C_4ac <- read.csv("Data/Samples/Perry_Composite_4ac.csv")
+soil_all <- read.csv("../Data/Samples/Perry_all_samples_all.csv")
 
 # Merge points + sample data:
-soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, since we only have composite data back so far.
+soil_points <- merge(soil_points, soil_all, by = "ID") #CID and SPID
 
 
 ```
@@ -62,37 +61,42 @@ soil_points <- merge(soil_points, soil_C_4ac, by = "CID") #CID is Composite ID, 
 ```{r 1m DEM}
 
 # Load the USGS 1m DEM (acts as the template)
-USGS_DEM <- rast("Data/USGS DEM/DEM rasters/output_USGS1m.tif")
+USGS_DEM <- rast("../Data/USGS DEM/DEM rasters/output_USGS1m.tif")
 
 # border:
-border <- vect("Data/Border/border_17N.shp")
+border <- vect("../Data/Border/border_17N.shp") #points 124 and 136 are NOT within bounds
+
+border_ext <-ext(border)
+
+
+
 
 # Crop and mask the DEM to the border extent
-clipped_DEM <- crop(USGS_DEM, border) |> mask(border)
+clipped_DEM <- crop(USGS_DEM, border_ext) |> mask(border_ext)
 
 # Load all topographic rasters
-topo_files <- list.files("Data/all rasters/", full.names = TRUE)
+topo_files <- list.files("../Data/all rasters/", full.names = TRUE)
 topo_rasters <- lapply(topo_files, rast)
 
 # Function to align rasters (clip first, then resample to 1m)
-align_raster <- function(r, template, border) {
+align_raster <- function(r, template, border_ext) {
   # Reproject raster
   if (crs(r) != crs(template)) {
     r <- project(r, crs(template), method = "bilinear")
   }
   # Resample to match the clipped DEM's resolution
   r <- resample(r, template, method = "bilinear")
-  # Crop and mask to the border FIRST
-  r <- crop(r, border) |> mask(border)
+  # Crop and mask to the border_ext FIRST
+  r <- crop(r, border_ext) |> mask(border_ext)
 
   return(r)
 }
 
 # Align all rasters
-aligned_rasters <- lapply(topo_rasters, align_raster, template = clipped_DEM, border = border)
+aligned_rasters <- lapply(topo_rasters, align_raster, template = clipped_DEM, border = border_ext)
 
 # Stack aligned rasters
-clipped_stack <- rast(aligned_rasters)
+clipped_stack <- terra::rast(aligned_rasters)
 
 # Summary check
 summary(clipped_stack)
@@ -102,7 +106,7 @@ summary(clipped_stack)
 
 ```{r Bare Soil}
 #planet bare soil imagery: 
-bare_soil <- rast("Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
+bare_soil <- rast("../Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
 #bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
 bare_soil_utm <- project(bare_soil,clipped_stack)
 #bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
@@ -121,7 +125,7 @@ surface_reflectance[[i]] <- bare_soil_res1[[i]] * reflectanceCoefficients[i]
 }
 
 # Save new SR
-writeRaster(surface_reflectance, "Output/Bare_soil/SR.tif", overwrite = TRUE)
+writeRaster(surface_reflectance, "../Output/Bare_soil/SR.tif", overwrite = TRUE)
 
   # Plot random band:
 plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
@@ -140,7 +144,7 @@ names(surface_reflectance)<-SR_names
 ```{r NDVI}
 
 # Veg data: Planet 
-Vegstack <- rast("Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
+Vegstack <- rast("../Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
 
 Vegstack_utm <- project(bare_soil,clipped_stack)
 
@@ -179,72 +183,73 @@ plot(SAVI)
 ```{r 1m rasters, eval = FALSE}
 
 #Visualizations via OpenTopography:
-aspect <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
+aspect <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
 #aspect_wgs84 <- project(aspect, "EPSG:4326",res = 1, method = "bilinear")
-clipped_aspect <- mask(aspect, vect(border))
+clipped_aspect <- mask(aspect, border_ext)
 plot(clipped_aspect)
 
-color_relief <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
+color_relief <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
 color_relief_wgs84 <- project(color_relief, "EPSG:4326",res = 1, method = "bilinear")
-clipped_color_relief_wgs84 <- mask(color_relief_wgs84, vect(border))
+clipped_color_relief_wgs84 <- mask(color_relief_wgs84, border_ext)
+plot(clipped_color_relief_wgs84)
 
-color_hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
+color_hillshade <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
 color_hillshade_wgs84 <- project(color_hillshade, "EPSG:4326",res = 1, method = "bilinear")
-clipped_color_hillshade_wgs84 <- mask(color_hillshade_wgs84, vect(border))
+clipped_color_hillshade_wgs84 <- mask(color_hillshade_wgs84, border_ext)
 
-hillshade <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
+hillshade <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
 hillshade_wgs84 <- project(hillshade, "EPSG:4326",res = 1, method = "bilinear")
-clipped_hillshade_wgs84 <- mask(hillshade_wgs84, vect(border))
+clipped_hillshade_wgs84 <- mask(hillshade_wgs84, border_ext)
 
-roughness <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
+roughness <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
 roughness_wgs84 <- project(roughness, "EPSG:4326",res = 1, method = "bilinear")
-clipped_roughness_wgs84 <- mask(roughness_wgs84, vect(border))
+clipped_roughness_wgs84 <- mask(roughness_wgs84, border_ext)
 
-slope <- rast("Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
+slope <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
 slope_wgs84 <- project(slope, "EPSG:4326",res = 1, method = "bilinear")
-clipped_slope_wgs84 <- mask(slope_wgs84, vect(border))
+clipped_slope_wgs84 <- mask(slope_wgs84, border_ext)
 
 
 #SAGA visualizations:
-slope_height <-rast("Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
+slope_height <-rast("../Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
 slope_height_wgs84 <- project(slope_height, "EPSG:4326",res = 1, method = "bilinear")
-clipped_slope_height_wgs84 <- mask(slope_height_wgs84, vect(border))
+clipped_slope_height_wgs84 <- mask(slope_height_wgs84, border_ext)
 
-valley_depth <-rast("Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
+valley_depth <-rast("../Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
 valley_depth_wgs84 <- project(valley_depth, "EPSG:4326",res = 1, method = "bilinear")
-clipped_valley_depth_wgs84 <- mask(valley_depth_wgs84, vect(border))
+clipped_valley_depth_wgs84 <- mask(valley_depth_wgs84, border_ext)
 
-norm_height <-rast("Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
+norm_height <-rast("../Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
 norm_height_wgs84 <- project(norm_height, "EPSG:4326",res = 1, method = "bilinear")
-clipped_norm_height_wgs84 <- mask(norm_height_wgs84, vect(border))
+clipped_norm_height_wgs84 <- mask(norm_height_wgs84, border_ext)
 
-std_height <-rast("Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
+std_height <-rast("../Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
 std_height_wgs84 <- project(std_height, "EPSG:4326",res = 1, method = "bilinear")
-clipped_std_height_wgs84 <- mask(std_height_wgs84, vect(border))
+clipped_std_height_wgs84 <- mask(std_height_wgs84, border_ext)
 
-mid_slope_pos <-rast("Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
+mid_slope_pos <-rast("../Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
 mid_slope_pos_wgs84 <- project(mid_slope_pos, "EPSG:4326",res = 1, method = "bilinear")
-clipped_mid_slope_pos_wgs84 <- mask(mid_slope_pos_wgs84, vect(border))
+clipped_mid_slope_pos_wgs84 <- mask(mid_slope_pos_wgs84, border_ext)
 
-topo_pos_index <-rast("Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
+topo_pos_index <-rast("../Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
 topo_pos_index_wgs84 <- project(topo_pos_index, "EPSG:4326",res = 1, method = "bilinear")
-clipped_topo_pos_index_wgs84 <- mask(topo_pos_index_wgs84, vect(border))
+clipped_topo_pos_index_wgs84 <- mask(topo_pos_index_wgs84, border_ext)
 
-topo_wet_index <-rast("Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
+topo_wet_index <-rast("../Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
 topo_wet_index_wgs84 <- project(topo_wet_index, "EPSG:4326",res = 1, method = "bilinear")
-clipped_topo_wet_index_wgs84 <- mask(topo_wet_index_wgs84, vect(border))
+clipped_topo_wet_index_wgs84 <- mask(topo_wet_index_wgs84, border_ext)
 
-terr_rugged_index <-rast("Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
+terr_rugged_index <-rast("../Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
 terr_rugged_index_wgs84 <- project(terr_rugged_index, "EPSG:4326",res = 1, method = "bilinear")
-clipped_terr_rugged_index_wgs84 <- mask(terr_rugged_index_wgs84, vect(border))
+clipped_terr_rugged_index_wgs84 <- mask(terr_rugged_index_wgs84, border_ext)
 
-mrvbf <-rast("Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
+mrvbf <-rast("../Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
 mrvbf_wgs84 <- project(mrvbf, "EPSG:4326",res = 1, method = "bilinear")
-clipped_mrvbf_wgs84 <- mask(mrvbf_wgs84, vect(border))
+clipped_mrvbf_wgs84 <- mask(mrvbf_wgs84, border_ext)
 
-mrrtf <-rast("Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
+mrrtf <-rast("../Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
 mrrtf_wgs84 <- project(mrrtf, "EPSG:4326",res = 1, method = "bilinear")
-clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, vect(border))
+clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, border_ext)
 
 
 ```
@@ -256,34 +261,17 @@ clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, vect(border))
 ```{r}
 
 
-
+#stack all
 covariates <- c(surface_reflectance, clipped_stack, NDVI, SAVI)
 
-
+#make names valid
 names(covariates) <- make.names(names(covariates))
-```
-
-
-
-
-
-
-
-
-```{r vect}
 
 
 # vect the sample data
 soil_points_vect <- vect(soil_points)
 
-```
 
-
-
-
-
-
-```{r Organizing for CM}
 # Extract raster values at soil sample points
 soil_points_all <- terra::extract(covariates, soil_points_vect, bind = T,xy = T)
 
@@ -292,15 +280,16 @@ soil_points_all <- terra::extract(covariates, soil_points_vect, bind = T,xy = T)
 soils_df <- as.data.frame(soil_points_all)
 
 
-# Select only the desired columns
+# Select only the soil property columns
 soil_df_cols <- soils_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
 
 
 #exclude non essential data:
 soils_df_wrang <- soils_df[ ,-(1:9)]
-
-
 ```
+
+
+
 
 
 
@@ -342,26 +331,13 @@ cor_matrix_soil_topo <- cor(soils_df_wrang[, soil_vars], soils_df_wrang[, topo_v
 # Visualize
 ggcorrplot(cor_matrix_soil_topo, lab = TRUE, show.legend = TRUE, 
            tl.cex = 5, lab_size = 2, tl.srt = 45, method = "circle")
-
-
-
-
-#scatterplot
-
-
-
-ggsave("../Mapping/Output/Correlation_Matrix_1.png")
+#save png of corr matrix
+ggsave("../Mapping/Output/Correlation_Matrix_all.png")
 
 ```
 
-
-
-
-
-
-
 #Stack Results
-```{r Stack data }
+```{r Stack data, eval = FALSE }
 
 cor_matrix_soil_topo_t <- t(cor_matrix_soil_topo)
 
@@ -374,8 +350,6 @@ for (i in 1:ncol(cor_matrix_soil_topo_t)) {
 
 cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 
-
-
 ```
 
 
@@ -384,13 +358,14 @@ cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
 library(caret)
 
 #seed:
-set.seed(10)
+set.seed(626)
 
 #set train control:
 trainControl <- trainControl(method = "cv", number = 5)
 
 
-#LBC: 
+#LBC: NOT necessary as LBC is NOT spatially correlated
+
 
 LBC_df <- soils_df_wrang %>%
   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
@@ -586,7 +561,8 @@ grid_sf <- st_as_sf(grid)
 
 grid_sp <- as_Spatial(grid_sf)
 
-soil_points_sf <- st_as_sf(soil_points_all)
+soil_points_sf <- st_as_sf(soil_points_all) %>%
+    filter(type == "CID")
 
 soil_points_sp <- as_Spatial(soil_points_sf)
 
@@ -606,7 +582,7 @@ LBC_kriged_spat<-vect(LBC_kriged_sf)
 
 LBC_kriged_raster<-rasterize(LBC_kriged_spat,covariates, field="var1.pred")
 
-plot(LBC_kriged_raster)
+plot(LBC_kriged_raster, main = "LBC Kriging")
 
 
 #P
@@ -627,7 +603,22 @@ P_kriged_spat<-vect(P_kriged_sf)
 
 P_kriged_raster<-rasterize(P_kriged_spat,covariates, field="var1.pred")
 
-plot(P_kriged_raster)
+plot(P_kriged_raster, main = "P Kriging")
+
+
+#p adjusted with points
+P_predict_adjusted <- P_predict
+
+soil_points_sf <- st_as_sf(soil_points_all, coords = c("x", "y"), crs = st_crs(covariates))
+
+coords <- st_coordinates(soil_points_sf)
+P_predict_adjusted[terra::cellFromXY(P_predict, coords)] <- soil_points_sf$P
+
+plot(P_predict_adjusted)
+
+
+
+
 
 
 #pH:
@@ -635,7 +626,7 @@ pH_var<-variogram(pH.2~1,data = soil_points_sp)
 
 #plot(pH_var)
 
-pH_varfit<-fit.variogram(pH_var, model = vgm("Sph"))
+pH_varfit<-fit.variogram(pH_var, model = vgm("Exp"))
 
 plot(pH_var, pH_varfit)
 
@@ -800,15 +791,11 @@ krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_
 
 #Classification
 
-```{r classify P and K }
+```{r classify P}
 
 # Define breaks and corresponding labels for Phosphorus (in ppm)
 P_classes <- c(0, 15, 30, 50, Inf)  # Breakpoints
 P_labels <- c(1, 2, 3, 4)  # Assign numeric labels
-
-# Define breaks and corresponding labels for Potassium (in ppm)
-K_classes <- c(0, 30, 75, 125, Inf)  # Breakpoints
-K_labels <- c(1, 2, 3, 4)  # Assign numeric labels
 
 # Create classification matrices
 P_class_matrix <- cbind(P_classes[-length(P_classes)], P_classes[-1], P_labels)
@@ -818,10 +805,6 @@ K_class_matrix <- cbind(K_classes[-length(K_classes)], K_classes[-1], K_labels)
 # Classify P rasters
 P_predict_classified <- classify(P_predict, P_class_matrix)
 P_kriged_classified <- classify(P_kriged_raster, P_class_matrix)
-
-# Classify K rasters
-K_predict_classified <- classify(K_predict, K_class_matrix)
-K_kriged_classified <- classify(K_kriged_raster, K_class_matrix)
 
 
 # Assign category labels
@@ -834,8 +817,6 @@ K_labels_factor <- c("Low K (0-60 lbs/A)", "Medium K (61-150 lbs/A)",
 levels(P_predict_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
 levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
 
-levels(K_predict_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
-levels(K_kriged_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
 
 par(mfrow = c(2,2))
 #RF
@@ -845,12 +826,58 @@ plot(K_predict_classified, main = "Classified K (RF Prediction)")
 
 #Kriging
 plot(P_kriged_classified, main = "Classified P (Kriging)")
-plot(K_kriged_classified, main = "Classified K (Kriging)")
+
+
+
+
+```
+```{r classify P adjusted}
+library(terra)
+
+# Classify P rasters #P adjusted is just forcing the soil points in
+P_predict_classified_adjust <- classify(P_predict_adjusted, P_class_matrix)
+
+
+#"Low P (0-30 lbs/A)" Apply 140 lbs of P205 per acre
+#"Medium P (31-60 lbs/A)" Apply 105 lbs of P205 per acre
+#"High P (61-100 lbs/A)" Apply 75 lbs of P205 per acre
+#"Very High P (100+ lbs/A)" Apply 0 lbs of P205 per acre
+
+
+
+# Assign category labels  for P:
+
+# Convert rasters to categorical factors
+levels(P_predict_classified_adjust) <- data.frame(ID = 1:4, category = P_labels_factor)
+levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
+
+
+#RF
+plot(P_predict_classified_adjust, main = "Classified P (RF Prediction)")
 
 
 
 ```
 
+
+```{r Classify K}
+
+# Define breaks and corresponding labels for Potassium (in ppm)
+K_classes <- c(0, 30, 75, 125, Inf)  # Breakpoints
+K_labels <- c(1, 2, 3, 4)  # Assign numeric labels
+
+
+# Classify K rasters
+K_predict_classified <- classify(K_predict, K_class_matrix)
+K_kriged_classified <- classify(K_kriged_raster, K_class_matrix)
+
+levels(K_predict_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
+levels(K_kriged_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
+
+plot(K_predict_classified, main = "Classified K (RF Prediction)")
+
+plot(K_kriged_classified, main = "Classified K (Kriging)")
+```
 
 ```{r pH}
 
@@ -1066,7 +1093,27 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 #flatten all soil nutrients together into ONE map per method (RF and kriging)
 ```
 
+```{r P clustering}
 
+library(terra)
+
+# 1. Aggregate (Optional: Only if you want to reduce resolution)
+# Example: Aggregate by a factor of 2 (adjust as needed)
+P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact= 15, fun=modal, expand=TRUE)
+
+# 2. Clump: Identify connected regions with the same value
+P_rf_clumped <- raster::clump(raster::raster(P_rf_agg), directions=8)  # Uses 8-direction connectivity
+
+# 3. Sieve: Remove small isolated clumps (e.g., smaller than 5 cells)
+P_rf_sieved <- terra::sieve(P_rf_agg, threshold=25)
+
+# 4. Save the cleaned raster
+#terra::writeRaster(P_rf_sieved, "P_RF_cleaned.tif", format="GTiff", overwrite=TRUE)
+
+# 5. Plot to check the results
+plot(P_rf_sieved, main="Cleaned RF Map (Aggregated, Clumped, and Sieved)")
+
+```
 
 #Clean Maps
 ```{r Clean Up Maps}
@@ -1119,13 +1166,175 @@ plot(zone_raster_low_res, main = "Management Zones for pH (Clustered)", col = te
 
 ```
 
-```{r Compare Maps}
-#results
+
+
+```{r Clean Up Maps P}
+library(terra)
+library(raster)
+library(viridis)
+
+# Step 1: Aggregate while preserving the modal classification
+P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact=12, fun=modal, expand=TRUE)
+
+# Step 2: Set 0 as NoData (mask it out)
+P_rf_agg[P_rf_agg == 0] <- NA
+
+# Step 3: Convert to raster format (for clumping)
+P_rf_agg_raster <- raster::raster(P_rf_agg)
+
+# Step 4: Clump (group connected cells)
+#P_rf_clumped <- raster::clump(P_rf_agg_raster, directions=4)
+
+# Step 5: Sieve (remove small isolated groups)
+P_rf_sieved <- terra::sieve(P_rf_agg, threshold=40)
+
+# Step 6: Reclassify values to match labels
+classify_P <- matrix(c(1, 1, 2, 2), ncol=2, byrow=TRUE)
+P_rf_final <- terra::classify(P_rf_sieved, classify_P)
+
+# Step 7: Assign category labels
+P_rf_final <- terra::as.factor(P_rf_final)
+levels(P_rf_final) <- data.frame(ID = c(1,2), 
+                                 Class = c("Apply 140 lbs of P205 per acre", 
+                                           "Apply 105 lbs of P205 per acre"))
+
+# Step 8: Save the cleaned raster
+#terra::writeRaster(P_rf_final, "P_RF_cleaned.tif", format="GTiff", overwrite=TRUE)
+
+# Define custom colors using viridis palette
+custom_colors <- viridis(4, option="D")[c(1, 2)]  # Ensures 105 lbs is teal
+
+# Step 9: Plot with correct classification
+plot(P_rf_final, main="Random Forest Model of P2O5 Recommendations for Corn", 
+     col=custom_colors, legend=FALSE)
+
+# Add legend inside the map
+legend("topright", legend=c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre"), 
+       fill=custom_colors,  inset = c(.07, 0),title="P Recommendation", bty="n", cex=0.5)
+
+```
+
+
+```{r P clustering}
+
+library(terra)
+
+# 1. Aggregate (Optional: Only if you want to reduce resolution)
+# Example: Aggregate by a factor of 2 (adjust as needed)
+P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact= 15, fun=modal, expand=TRUE)
+
+# 2. Clump: Identify connected regions with the same value
+P_rf_clumped <- raster::clump(raster::raster(P_rf_agg), directions=8)  # Uses 8-direction connectivity
+
+# 3. Sieve: Remove small isolated clumps (e.g., smaller than 5 cells)
+P_rf_sieved <- terra::sieve(P_rf_agg, threshold=25)
+
+# 4. Save the cleaned raster
+#terra::writeRaster(P_rf_sieved, "P_RF_cleaned.tif", format="GTiff", overwrite=TRUE)
+
+# 5. Plot to check the results
+plot(P_rf_sieved, main="Cleaned RF Map (Aggregated, Clumped, and Sieved)")
+
 ```
 
 
 
 
+```{r Compare Maps}
+library(terra)
+library(viridis)
+
+
+
+# Define custom viridis colors for classification (same across all maps)
+custom_colors <- viridis(4, option = "D")
+
+# Assign category labels for P
+P_labels_factor <- c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre",
+                     "Apply 75 lbs of P205 per acre", "Apply 0 lbs of P205 per acre")
+
+# Assign category labels for K
+K_labels_factor <- c("Apply 180 lbs of K2O per acre", "Apply 140 lbs of K2O per acre", 
+                     "Apply 120 lbs of K2O per acre", "Apply 0 lbs of K2O per acre")
+
+# Create separate plots for each raster with legends outside
+
+# Plot RF classified P
+
+plot(P_rf_final, main = "Random Forest Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=P_labels_factor, fill=custom_colors, 
+       title="P Recommendation", bty="n", cex=0.5)  # Smaller text 
+
+
+
+# Plot RF classified K
+plot(K_predict_classified, main = "Random Forest Model of K2O Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=K_labels_factor, fill=custom_colors, 
+       title="K Recommendation", bty="n", cex=0.5)  # Smaller text
+
+# Plot Kriged classified P
+plot(P_kriged_classified, main = "Kriging Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=P_labels_factor, fill=custom_colors, 
+       title="P Recommendation", bty="n", cex=0.5)  # Smaller text
+
+# Plot Kriged classified K
+plot(K_kriged_classified, main = "Kriging Model of K2O Recommendations for Corn)", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, 0), legend=K_labels_factor, fill=custom_colors, 
+       title="K Recommendation", bty="n", cex=0.5)  # Smaller text
+
+```
+
+
+
+
+```{r export classified P RF }
+# Export the raster as a .tif file
+terra::writeRaster(P_predict_classified_adjust, 
+                   filename = "../Mapping/Output/GIS maps/P_RF_map.tif", 
+                   overwrite = TRUE)
+
+
+
+
+
+
+
+
+
+
+png("../Mapping/Output/RF_P_MAP_FINAL.png", width = 10, height = 7, units = "in", res = 300)
+
+# Define custom colors using viridis palette
+custom_colors <- viridis(4, option="D")[c(1, 2)]  # Ensures 105 lbs is teal
+
+# Step 9: Plot with correct classification
+plot(P_rf_final, main="Random Forest Model of P2O5 Recommendations for Corn", 
+     col=custom_colors, legend=FALSE)
+
+# Add legend inside the map
+legend("topright", legend=c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre"), 
+       fill=custom_colors,  inset = c(.07, 0.01),title="P Recommendation", bty="n", cex=0.8)
+dev.off
+
+
+
+
+
+#krig
+png("../Mapping/Output/KRIG_P_MAP_FINAL.png", width = 10, height = 7, units = "in", res = 300)
+
+# Plot Kriged classified P
+plot(P_kriged_classified, main = "Kriging Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, .01), legend=P_labels_factor, fill=custom_colors, 
+       title="P Recommendation", bty="n", cex=0.8)  # Smaller text
+dev.off
+```
+
+
+
+```{r Compare Maps}
+#results
+```
 
 
 

@@ -52,6 +52,97 @@ clipped_SR <- mask(surface_reflectance_1m, vect(border))
 
 
 ```
+```{r 1m rasters, eval = FALSE}
+#NOT USING THIS ANYMORE... ARCHIVED
+
+
+#Visualizations via OpenTopography:
+aspect <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_aspect.tif")
+aspect_wgs84 <- project(aspect, crs(border_ext),res = 1, method = "bilinear")
+clipped_aspect <- mask(aspect, border_ext)
+plot(clipped_aspect)
+
+color_relief <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_color-relief.tif")
+color_relief_wgs84 <- project(color_relief, crs(border_ext),res = 1, method = "bilinear")
+clipped_color_relief_wgs84 <- mask(color_relief, border_ext)
+plot(clipped_color_relief_wgs84)
+
+#PCA relief:
+
+princomp_color_relief <- terra::princomp(clipped_color_relief_wgs84)
+
+PCA_color_relief <- predict(clipped_color_relief_wgs84, princomp_color_relief, index = 1:3)
+
+#Hillshade color is a blend of hillshade with color relief. Do i need this?
+color_hillshade <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade-color.tif")
+color_hillshade_wgs84 <- project(color_hillshade, crs(border_ext),res = 1, method = "bilinear") #THIS DOES NOT WORK
+clipped_color_hillshade_wgs84 <- mask(color_hillshade_wgs84, border_ext)
+plot(clipped_color_hillshade_wgs84)
+
+#PCA hillshade:
+
+princomp_color_hillshade <- terra::princomp(clipped_color_hillshade_wgs84)
+
+PCA_color_hillshade <- predict(clipped_color_hillshade_wgs84, princomp_color_hillshade, index = 1:2)
+
+
+
+hillshade <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_hillshade.tif")
+hillshade_wgs84 <- project(hillshade, crs(border_ext),res = 1, method = "bilinear")
+clipped_hillshade_wgs84 <- mask(hillshade, border_ext)
+
+roughness <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_roughness.tif")
+roughness_wgs84 <- project(roughness, crs(border_ext),res = 1, method = "bilinear")
+clipped_roughness_wgs84 <- mask(roughness_wgs84, border_ext)
+
+slope <- rast("../Data/USGS DEM/Visualization Products/viz.USGS1m_slope.tif")
+slope_wgs84 <- project(slope, crs(border_ext),res = 1, method = "bilinear")
+clipped_slope_wgs84 <- mask(slope_wgs84, border_ext)
+
+
+#SAGA visualizations: NEED TO ADD CURVATURE!!
+slope_height <-rast("../Data/USGS DEM/SAGA/Slope Height.sg-grd-z")
+slope_height_wgs84 <- project(slope_height, crs(border_ext),res = 1, method = "bilinear")
+clipped_slope_height_wgs84 <- mask(slope_height_wgs84, border_ext)
+
+valley_depth <-rast("../Data/USGS DEM/SAGA/Valley Depth.sg-grd-z")
+valley_depth_wgs84 <- project(valley_depth, crs(border_ext),res = 1, method = "bilinear")
+clipped_valley_depth_wgs84 <- mask(valley_depth_wgs84, border_ext)
+
+norm_height <-rast("../Data/USGS DEM/SAGA/Normalized Height.sg-grd-z")
+norm_height_wgs84 <- project(norm_height, crs(border_ext),res = 1, method = "bilinear")
+clipped_norm_height_wgs84 <- mask(norm_height_wgs84, border_ext)
+
+std_height <-rast("../Data/USGS DEM/SAGA/Standardized Height.sg-grd-z")
+std_height_wgs84 <- project(std_height, crs(border_ext),res = 1, method = "bilinear")
+clipped_std_height_wgs84 <- mask(std_height_wgs84, border_ext)
+
+mid_slope_pos <-rast("../Data/USGS DEM/SAGA/Mid-Slope Positon.sg-grd-z")
+mid_slope_pos_wgs84 <- project(mid_slope_pos, crs(border_ext),res = 1, method = "bilinear")
+clipped_mid_slope_pos_wgs84 <- mask(mid_slope_pos_wgs84, border_ext)
+
+topo_pos_index <-rast("../Data/USGS DEM/SAGA/Topographic Position Index.sg-grd-z")
+topo_pos_index_wgs84 <- project(topo_pos_index, crs(border_ext),res = 1, method = "bilinear")
+clipped_topo_pos_index_wgs84 <- mask(topo_pos_index_wgs84, border_ext)
+
+topo_wet_index <-rast("../Data/USGS DEM/SAGA/Topographic Wetness Index.sg-grd-z")
+topo_wet_index_wgs84 <- project(topo_wet_index, crs(border_ext),res = 1, method = "bilinear")
+clipped_topo_wet_index_wgs84 <- mask(topo_wet_index_wgs84, border_ext)
+
+terr_rugged_index <-rast("../Data/USGS DEM/SAGA/Terrain Ruggedness Index (TRI).sg-grd-z")
+terr_rugged_index_wgs84 <- project(terr_rugged_index, crs(border_ext),res = 1, method = "bilinear")
+clipped_terr_rugged_index_wgs84 <- mask(terr_rugged_index_wgs84, border_ext)
+
+mrvbf <-rast("../Data/USGS DEM/SAGA/MRVBF.sg-grd-z")
+mrvbf_wgs84 <- project(mrvbf, crs(border_ext),res = 1, method = "bilinear")
+clipped_mrvbf_wgs84 <- mask(mrvbf_wgs84, border_ext)
+
+mrrtf <-rast("../Data/USGS DEM/SAGA/MRRTF.sg-grd-z")
+mrrtf_wgs84 <- project(mrrtf, crs(border_ext),res = 1, method = "bilinear")
+clipped_mrrtf_wgs84 <- mask(mrrtf_wgs84, border_ext)
+
+
+```
 
 
 ```{r Data Snapping, eval = FALSE }
@@ -128,7 +219,21 @@ SAVI_1m <- resample(SAVI, USGS_DEM_wgs84, method = "bilinear")
 
 #get_top_correlated()
 ```
+###Stack Results
+```{r Stack data, eval = FALSE }
 
+cor_matrix_soil_topo_t <- t(cor_matrix_soil_topo)
+
+cor_sort<-list()
+
+for (i in 1:ncol(cor_matrix_soil_topo_t)) {
+  col_sort<-sort(abs(cor_matrix_soil_topo_t[,i]),decreasing = T)
+  cor_sort[[i]]<-col_sort
+}
+
+cor_sort_wrang<-setNames(cor_sort,colnames(cor_matrix_soil_topo_t))
+
+```
 
 ```{r PA method, eval - FALSE}
 # Create variogram model for each variable

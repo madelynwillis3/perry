@@ -193,7 +193,7 @@ plot(SAVI)
 
 
 
-##RF
+
 ```{r wrangling}
 
 
@@ -206,65 +206,74 @@ names(covariates) <- make.names(names(covariates))
 #sort by SINGLE POINT DATA
 soil_points_singlepoint <- filter(soil_points, type == "SPID")
 
+#sort by COMPOSITE DATA
+soil_points_composite <- filter(soil_points, type == "CID")
+
 # vect the sample data
-soil_points_vect <- vect(soil_points_singlepoint)
+soil_points_vect_SP <- vect(soil_points_singlepoint)
+soil_points_vect_C <- vect(soil_points_composite)
 
 
 # Extract raster values at soil sample points
-soil_points_all <- terra::extract(covariates, soil_points_vect, bind = T,xy = T)
+soil_points_SPID <- terra::extract(covariates, soil_points_vect_SP, bind = T,xy = T)
+soil_points_CID <- terra::extract(covariates, soil_points_vect_C, bind = T,xy = T)
 
 
 #convert to df
-soils_df <- as.data.frame(soil_points_all)
-
+soils_df_SP <- as.data.frame(soil_points_SPID)
+soils_df_C <- as.data.frame(soil_points_CID)
 
 # Select only the soil property columns
-soil_df_cols <- soils_df[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
+soil_df_cols_SP <- soils_df_SP[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
+soil_df_cols_C <- soils_df_C[, c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')]
 
 
 #exclude non essential data:
-soils_df_wrang <- soils_df[ ,-(1:9)]
+soils_df_wrang_SP <- soils_df_SP[ ,-(1:9)]
+soils_df_wrang_C <- soils_df_C[ ,-(1:9)]
+
 ```
 
 
-
+##RF
 ###Correlation Matrix
 ```{r CM }
 # Compute correlation matrix
-cor_matrix <- cor(soils_df_wrang, use = "pairwise.complete.obs", method = "spearman")
+cor_matrix_SP <- cor(soils_df_wrang_SP, use = "pairwise.complete.obs", method = "spearman")
+cor_matrix_C <- cor(soils_df_wrang_C, use = "pairwise.complete.obs", method = "spearman")
 
 ```
 
 ```{r plotting CM }
 #formatting:
-ggcorrplot(cor_matrix, type = "lower", 
+ggcorrplot(cor_matrix_SP, type = "lower", 
            lab = TRUE, show.legend = TRUE, 
            tl.cex = 4, # Adjust text size
            lab_size = 2, # Adjust correlation label size
            tl.srt = 45) # Rotate axis labels
 
-ggcorrplot(cor_matrix, type = "lower", 
+ggcorrplot(cor_matrix_SP, type = "lower", 
            lab = TRUE, show.legend = TRUE, 
            tl.cex = 4, # Adjust text size
            lab_size = 2, # Adjust correlation label size
            tl.srt = 45,           
            hc.order = TRUE, # Cluster similar variables together
            insig = "blank", # Hide insignificant correlations
-           p.mat = cor_pmat(soils_df_wrang)
+           p.mat = cor_pmat(soils_df_wrang_SP)
            ) # Rotate axis labels
 
 
 # col name of soil properties
-soil_vars <- colnames(soil_df_cols)
+soil_vars <- colnames(soil_df_cols_SP)
 # topo name list
 topo_vars <- setdiff(colnames(soils_df_wrang), soil_vars)
 
 # Compute correlation matrix only between soil properties and topo rasters
-cor_matrix_soil_topo <- cor(soils_df_wrang[, soil_vars], soils_df_wrang[, topo_vars], 
+cor_matrix_soil_topo_SP <- cor(soils_df_wrang_SP[, soil_vars], soils_df_wrang[, topo_vars], 
                             use = "pairwise.complete.obs", method = "spearman")
 
 # Visualize
-ggcorrplot(cor_matrix_soil_topo, lab = TRUE, show.legend = TRUE, 
+ggcorrplot(cor_matrix_soil_topo_SP, lab = TRUE, show.legend = TRUE, 
            tl.cex = 5, lab_size = 2, tl.srt = 45, method = "circle")
 #save png of corr matrix
 ggsave("../Mapping/Output/Correlation_Matrix_all.png")
@@ -275,7 +284,7 @@ ggsave("../Mapping/Output/Correlation_Matrix_all.png")
 
 PCA_covar <- terra::princomp(covariates) #PCA of covariates
 
-PCA_data <- stats::prcomp(soils_df_wrang, scale = T) #PCA of soil data
+PCA_data <- stats::prcomp(soils_df_wrang_SP, scale = T) #PCA of soil data with just sp
 
 PCA_var <- get_pca_var(PCA_data)
 
@@ -300,7 +309,7 @@ trainControl <- trainControl(method = "cv", number = 5)
 #LBC: NOT necessary as LBC is NOT spatially correlated
 
 
-LBC_df <- soils_df_wrang %>%
+LBC_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
 LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
@@ -324,7 +333,7 @@ plot(LBC_predict)
 
 #pH
 
-pH_df <- soils_df_wrang %>%
+pH_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
 pH_index_train <- caret::createDataPartition(pH_df$pH.2, p = .8, list = F)
@@ -348,7 +357,7 @@ plot(pH_predict)
 
 
 #Ca:
-Ca_df <- soils_df_wrang %>%
+Ca_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
 Ca_index_train <- caret::createDataPartition(Ca_df$Ca, p = .8, list = F)
@@ -372,7 +381,7 @@ plot(Ca_predict)
 
 #K:
 
-K_df <- soils_df_wrang %>%
+K_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
 K_index_train <- caret::createDataPartition(K_df$K, p = .8, list = F)
@@ -394,7 +403,7 @@ plot(K_predict)
 
 #Mg:
 
-Mg_df <- soils_df_wrang %>%
+Mg_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
 
 Mg_index_train <- caret::createDataPartition(Mg_df$Mg, p = .8, list = F)
@@ -415,7 +424,7 @@ plot(Mg_predict)
 
 #Mn:
 
-Mn_df <- soils_df_wrang %>%
+Mn_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
 
 Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
@@ -436,7 +445,7 @@ plot(Mn_predict)
 
 #P:
 
-P_df <- soils_df_wrang %>%
+P_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'Zn','x','y'))
 
 P_index_train <- caret::createDataPartition(P_df$P, p = .8, list = F)
@@ -457,7 +466,7 @@ plot(P_predict)
 
 #Zn:
 
-Zn_df <- soils_df_wrang %>%
+Zn_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P','x','y'))
 
 Zn_index_train <- caret::createDataPartition(Zn_df$Zn, p = .8, list = F)
@@ -482,8 +491,8 @@ plot(Zn_predict)
 ```
 
 
-#Kriging
-```{r Kriging}
+#Kriging: Composite
+```{r Kriging CID}
 
 #setting grid as points for kriging
 grid<-as.points(covariates)
@@ -494,20 +503,19 @@ grid_sf <- st_as_sf(grid)
 
 grid_sp <- as_Spatial(grid_sf)
 
-soil_points_sf <- st_as_sf(soil_points_all) %>%
-    filter(type == "CID")
+soil_points_sf_CID <- st_as_sf(soil_points_CID)
 
-soil_points_sp <- as_Spatial(soil_points_sf)
+soil_points_sp_CID <- as_Spatial(soil_points_sf_CID)
 
 #LBC
 
-LBC_var<-variogram(LBC.1~1,data = soil_points_sp)
+LBC_var<-variogram(LBC.1~1,data = soil_points_sp_CID)
 
 LBC_varfit<-fit.variogram(LBC_var, model = vgm("Nug")) #nugget- reassess with full data
 
 plot(LBC_var, LBC_varfit)
 
-LBC_kriged<-krige(LBC.1~1,soil_points_sp,grid_sp,model = LBC_varfit)
+LBC_kriged<-krige(LBC.1~1,soil_points_sp_CID,grid_sp,model = LBC_varfit)
 
 LBC_kriged_sf<-st_as_sf(LBC_kriged)
 
@@ -520,15 +528,15 @@ plot(LBC_kriged_raster, main = "LBC Kriging")
 
 #P
 
-P_var<-variogram(P~1,data = soil_points_sp)
+P_var_C<-variogram(P~1,data = soil_points_sp_CID)
 
-#plot(P_var)
+plot(P_var_C)
 
-P_varfit<-fit.variogram(P_var, model = vgm("Sph"))
+P_varfit_C<-fit.variogram(P_var_C, model = vgm("Gau"))
 
-plot(P_var, P_varfit)
+plot(P_var_C, P_varfit_C)
 
-P_kriged<-krige(P~1,soil_points_sp,grid_sp,model = P_varfit)
+P_kriged<-krige(P~1,soil_points_sp_CID, grid_sp,model = P_varfit_C)
 
 P_kriged_sf<-st_as_sf(P_kriged)
 
@@ -542,7 +550,7 @@ plot(P_kriged_raster, main = "P Kriging")
 #p adjusted with points
 P_predict_adjusted <- P_predict
 
-soil_points_sf <- st_as_sf(soil_points_all, coords = c("x", "y"), crs = st_crs(covariates))
+soil_points_sf <- st_as_sf(soil_points_CID, coords = c("x", "y"), crs = st_crs(covariates))
 
 coords <- st_coordinates(soil_points_sf)
 P_predict_adjusted[terra::cellFromXY(P_predict, coords)] <- soil_points_sf$P
@@ -555,23 +563,23 @@ plot(P_predict_adjusted)
 
 
 #pH:
-pH_var<-variogram(pH.2~1,data = soil_points_sp)
+pH_var_C<-variogram(pH.2~1,data = soil_points_sp_CID)
 
 #plot(pH_var)
 
-pH_varfit<-fit.variogram(pH_var, model = vgm("Exp"))
+pH_varfit_C<-fit.variogram(pH_var_C, model = vgm("Exp"))
 
-plot(pH_var, pH_varfit)
+plot(pH_var_C, pH_varfit_C)
 
-pH_kriged<-krige(pH.2~1,soil_points_sp,grid_sp,model = pH_varfit)
+pH_kriged_C<-krige(pH.2~1,soil_points_sp_CID,grid_sp,model = pH_varfit)
 
-pH_kriged_sf<-st_as_sf(pH_kriged)
+pH_kriged_sf_C<-st_as_sf(pH_kriged_C)
 
-pH_kriged_spat<-vect(pH_kriged_sf)
+pH_kriged_spat_C<-vect(pH_kriged_sf_C)
 
-pH_kriged_raster<-rasterize(pH_kriged_spat,covariates, field="var1.pred")
+pH_kriged_raster_C<-rasterize(pH_kriged_spat_C,covariates, field="var1.pred")
 
-plot(pH_kriged_raster)
+plot(pH_kriged_raster_C)
 
 
 
@@ -685,7 +693,199 @@ plot(Zn_kriged_raster, main = "Zn kriged")
 
 
 ```
+#Kriging Single point
+```{r Kriging SPID}
 
+
+
+soil_points_sf_SPID <- st_as_sf(soil_points_SPID) 
+soil_points_sp_SPID <- as_Spatial(soil_points_sf_SPID)
+
+#LBC
+
+LBC_var<-variogram(LBC.1~1,data = soil_points_sp_SPID)
+
+LBC_varfit<-fit.variogram(LBC_var, model = vgm("Nug")) #nugget- reassess with full data
+
+plot(LBC_var, LBC_varfit)
+
+LBC_kriged<-krige(LBC.1~1,soil_points_sp_SPID,grid_sp,model = LBC_varfit)
+
+LBC_kriged_sf<-st_as_sf(LBC_kriged)
+
+LBC_kriged_spat<-vect(LBC_kriged_sf)
+
+LBC_kriged_raster<-rasterize(LBC_kriged_spat,covariates, field="var1.pred")
+
+plot(LBC_kriged_raster, main = "LBC Kriging")
+
+
+#P
+
+P_var_SP<-variogram(P~1,data = soil_points_sp_SPID)
+
+plot(P_var_SP)
+
+P_varfit_SP<-fit.variogram(P_var_SP, model = vgm("Sph"))
+
+plot(P_var_SP, P_varfit_SP)
+
+P_kriged<-krige(P~1,soil_points_sp_SPID,grid_sp,model = P_varfit)
+
+P_kriged_sf<-st_as_sf(P_kriged)
+
+P_kriged_spat<-vect(P_kriged_sf)
+
+P_kriged_raster<-rasterize(P_kriged_spat,covariates, field="var1.pred")
+
+plot(P_kriged_raster, main = "P Kriging")
+
+
+#p adjusted with points
+P_predict_adjusted <- P_predict
+
+soil_points_sf <- st_as_sf(soil_points_all, coords = c("x", "y"), crs = st_crs(covariates))
+
+coords <- st_coordinates(soil_points_sf)
+P_predict_adjusted[terra::cellFromXY(P_predict, coords)] <- soil_points_sf$P
+
+plot(P_predict_adjusted)
+
+
+
+
+
+
+#pH:
+pH_var_SP<-variogram(pH.2~1,data = soil_points_sp_SPID)
+
+#plot(pH_var)
+
+pH_varfit_SP<-fit.variogram(pH_var_SP, model = vgm("Sph"))
+
+plot(pH_var_SP, pH_varfit_SP)
+
+pH_kriged_SP<-krige(pH.2~1,soil_points_sp_SPID,grid_sp,model = pH_varfit)
+
+pH_kriged_sf_SP<-st_as_sf(pH_kriged_SP)
+
+pH_kriged_spat_SP<-vect(pH_kriged_sf_SP)
+
+pH_kriged_raster_SP<-rasterize(pH_kriged_spat_SP,covariates, field="var1.pred")
+
+plot(pH_kriged_raster_SP)
+
+
+
+
+#Ca:
+Ca_var<-variogram(Ca~1,data = soil_points_sp)
+
+#plot(Ca_var)
+
+Ca_varfit<-fit.variogram(Ca_var, model = vgm("Sph"))
+
+plot(Ca_var, Ca_varfit)
+
+Ca_kriged<-krige(Ca~1,soil_points_sp,grid_sp,model = Ca_varfit)
+
+Ca_kriged_sf<-st_as_sf(Ca_kriged)
+
+Ca_kriged_spat<-vect(Ca_kriged_sf)
+
+Ca_kriged_raster<-rasterize(Ca_kriged_spat,covariates, field="var1.pred")
+
+plot(Ca_kriged_raster)
+
+
+
+#K:
+
+K_var<-variogram(K~1,data = soil_points_sp)
+
+plot(K_var)
+
+K_varfit<-fit.variogram(K_var, model = vgm("Sph"))
+
+plot(K_var, K_varfit)
+
+K_kriged<-krige(K~1,soil_points_sp,grid_sp,model = K_varfit)
+
+K_kriged_sf<-st_as_sf(K_kriged)
+
+K_kriged_spat<-vect(K_kriged_sf)
+
+K_kriged_raster<-rasterize(K_kriged_spat,covariates, field="var1.pred")
+
+plot(K_kriged_raster)
+
+
+
+#Mg
+Mg_var<-variogram(Mg~1,data = soil_points_sp)
+
+plot(Mg_var)
+
+Mg_varfit<-fit.variogram(Mg_var, model = vgm("Sph")) #was nugget, now sph
+
+plot(Mg_var, Mg_varfit)
+
+Mg_kriged<-krige(Mg~1,soil_points_sp,grid_sp,model = Mg_varfit)
+
+Mg_kriged_sf<-st_as_sf(Mg_kriged)
+
+Mg_kriged_spat<-vect(Mg_kriged_sf)
+
+Mg_kriged_raster<-rasterize(Mg_kriged_spat,covariates, field="var1.pred")
+
+plot(Mg_kriged_raster)
+
+
+#Mn:
+
+Mn_var<-variogram(Mn~1,data = soil_points_sp)
+
+plot(Mn_var)
+
+Mn_varfit<-fit.variogram(Mn_var, model = vgm("Sph")) 
+
+plot(Mn_var, Mn_varfit)
+
+Mn_kriged<-krige(Mn~1,soil_points_sp,grid_sp,model = Mn_varfit)
+
+Mn_kriged_sf<-st_as_sf(Mn_kriged)
+
+Mn_kriged_spat<-vect(Mn_kriged_sf)
+
+Mn_kriged_raster<-rasterize(Mn_kriged_spat,covariates, field="var1.pred")
+
+plot(Mn_kriged_raster)
+
+
+#Zn: NO spatial autocorrelation.
+
+Zn_var<-variogram(Zn~1,data = soil_points_sp)
+
+plot(Zn_var)
+
+Zn_varfit<-fit.variogram(Zn_var, model = vgm("Nug")) #none
+
+plot(Zn_var, Zn_varfit)
+
+Zn_kriged<-krige(Zn~1,soil_points_sp,grid_sp,model = Zn_varfit)
+
+Zn_kriged_sf<-st_as_sf(Zn_kriged)
+
+Zn_kriged_spat<-vect(Zn_kriged_sf)
+
+Zn_kriged_raster<-rasterize(Zn_kriged_spat,covariates, field="var1.pred")
+
+plot(Zn_kriged_raster, main = "Zn kriged")
+
+
+
+
+```
 
 
 

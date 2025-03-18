@@ -1288,7 +1288,7 @@ K_labels_factor <- c("Apply 180 lbs of K2O per acre", "Apply 140 lbs of K2O per 
 
 # Plot RF classified P
 
-plot(P_predict_classified_adjust, main = "Random Forest Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+plot(P_rf_final, main = "Random Forest Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
 legend("topright", inset = c(.07, 0), legend=P_labels_factor, fill=custom_colors, 
        title="P Recommendation", bty="n", cex=0.5)  # Smaller text 
 
@@ -1320,6 +1320,41 @@ terra::writeRaster(P_predict_classified_adjust,
                    filename = "../Mapping/Output/GIS maps/P_RF_map.tif", 
                    overwrite = TRUE)
 
+
+
+
+
+
+
+
+
+
+png("../Mapping/Output/RF_P_MAP_FINAL.png", width = 10, height = 7, units = "in", res = 300)
+
+# Define custom colors using viridis palette
+custom_colors <- viridis(4, option="D")[c(1, 2)]  # Ensures 105 lbs is teal
+
+# Step 9: Plot with correct classification
+plot(P_rf_final, main="Random Forest Model of P2O5 Recommendations for Corn", 
+     col=custom_colors, legend=FALSE)
+
+# Add legend inside the map
+legend("topright", legend=c("Apply 140 lbs of P205 per acre", "Apply 105 lbs of P205 per acre"), 
+       fill=custom_colors,  inset = c(.07, 0.01),title="P Recommendation", bty="n", cex=0.8)
+dev.off
+
+
+
+
+
+#krig
+png("../Mapping/Output/KRIG_P_MAP_FINAL.png", width = 10, height = 7, units = "in", res = 300)
+
+# Plot Kriged classified P
+plot(P_kriged_classified, main = "Kriging Model of P2O5 Recommendations for Corn", col=custom_colors, legend=FALSE)
+legend("topright", inset = c(.07, .01), legend=P_labels_factor, fill=custom_colors, 
+       title="P Recommendation", bty="n", cex=0.8)  # Smaller text
+dev.off
 ```
 
 

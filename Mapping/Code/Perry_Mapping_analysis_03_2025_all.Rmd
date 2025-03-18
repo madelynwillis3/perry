@@ -67,7 +67,7 @@ soil_points <- merge(soil_points, soil_all, by = "ID") #CID and SPID
 USGS_DEM <- rast("../Data/USGS DEM/DEM rasters/output_USGS1m.tif")
 
 # border:
-border <- vect("../Data/Border/border_17N.shp") #points 124 and 136 are NOT within bounds
+border <- vect("../Data/Border/border_17N.shp") #points 124 and 136 are NOT within bounds. That's why we are using different border
 
 border_ext <-ext(border)
 

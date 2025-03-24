@@ -1,0 +1,245 @@
+---
+title: "AQP_test"
+author: "Madelyn Willis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Library Setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#remove pound symbols below if not yet installed 
+#install.packages("aqp") 
+#install.packages("soilDB")
+library(aqp)
+library(soilDB)
+#library(sharpshootR)
+library(dendextend)
+library(latticeExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(SoilTaxonomy)
+library(dplyr)
+library(janitor)
+library(tidyr)
+library(stringr)
+```
+
+
+
+```{r Data Frame}
+
+
+# Load Perry data and wrangle
+data_frame <- read.csv("../Data/Full Profile Data/Perry Full-Profile SampleData_03_2025.csv", header = TRUE, sep = ",")
+data_frame <- data_frame %>%
+  clean_names %>% 
+  rename(id = sample_id_lab) %>% #rename to id
+  rename(hzid = horizon) %>% #rename to hzid
+  mutate(top = as.numeric(sub("-.*", "", to_depth_cm)),  # Extracts the top depth
+    bottom = as.numeric(str_remove(sub(".*-", "", to_depth_cm), "\\+"))) # Extracts and removes "+" from bottom
+
+ 
+# Define a mapping of texture abbreviations to their full names
+texture_map <- c(
+  "LS" = "loamy_sand",
+  "SCL" = "sandy_clay_loam",
+  "SL" = "sandy_loam",
+  "L" = "loam",
+  "CL" = "clay_loam",
+  "S" = "sand",
+  "C" = "clay",
+  "SIL" = "silt_loam",
+  "SI" = "silt",
+  "SC" = "sandy_clay",
+  "C " = "clay"
+)
+
+
+
+
+# Replace texture abbreviations with full names
+data_frame <- data_frame %>%
+  mutate(texture = recode(lab_texture_lpsa_preliminary, !!!texture_map)) %>%
+  mutate( # Use regex to add a space between hue and value/chroma
+    color_corrected = gsub("([A-Za-z]+)([0-9]+)", "\\1 \\2", matrix_color),
+    # Split color into three parts: Hue, Value, and Chroma
+    hue = sapply(strsplit(as.character(color_corrected), " "), function(x) x[1]),
+    value_chroma = sapply(strsplit(as.character(color_corrected), " "), function(x) x[2]),
+    value = sapply(strsplit(value_chroma, "/"), function(x) x[1]),
+    chroma = sapply(strsplit(value_chroma, "/"), function(x) x[2]),
+    color = munsell2rgb(the_hue = hue, the_value = value,  # Split the 'color' column into separate hue, value, and chroma components
+    the_chroma = chroma, return_triplets=FALSE)) #return triplets is false bc otherwise it gives 3 columns with separate rgb
+  
+
+
+# template data:
+## 'data.frame':    30 obs. of  13 variables:
+##  $ id         : chr  "colusa" "colusa" "colusa" "colusa" ...
+##  $ name       : chr  "A" "ABt" "Bt1" "Bt2" ...
+##  $ top        : int  0 3 8 30 0 9 0 4 13 0 ...
+##  $ bottom     : int  3 8 30 42 9 34 4 13 40 6 ...
+##  $ K          : num  0.3 0.2 0.1 0.1 0.2 0.3 0.2 0.6 0.8 0.4 ...
+##  $ Mg         : num  25.7 23.7 23.2 44.3 21.9 18.9 12.1 12.1 17.7 16.4 ...
+##  $ Ca         : num  9 5.6 1.9 0.3 4.4 4.5 1.4 7 4.4 24.1 ...
+##  $ CEC_7      : num  23 21.4 23.7 43 18.8 27.5 23.7 18 20 31.1 ...
+##  $ ex_Ca_to_Mg: num  0.35 0.23 0.08 0.01 0.2 0.2 0.58 0.51 0.25 1.47 ...
+##  $ sand       : int  46 42 40 27 54 49 43 36 27 43 ...
+##  $ silt       : int  33 31 28 18 20 18 55 49 45 42 ...
+##  $ clay       : int  21 27 32 55 25 34 3 15 27 15 ...
+##  $ CF         : num  0.12 0.27 0.27 0.16 0.55 0.84 0.5 0.75 0.67 0.02 ...
+# optionally read about it with ?sp4
+#we dont have CF yet....
+
+data_frame <- data_frame %>%
+  select(point, id, hzid, top, bottom, texture, sand, silt, clay, color) %>% #column selection
+  arrange(point, id, hzid, top, bottom, texture, clay, sand, silt, color) #order
+
+aqp::depths(data_frame) <- point ~ top + bottom
+#site(spc) <- data_frame[, c("id")]  # Assign profile-level data
+#horizons(spc) <- data_frame         # Assign horizon-level data 
+
+
+```
+
+```{r Fetch Soil Series}
+# Fetch OSD data for soil series in the southeastern U.S. IDK even if this is how this works bruh
+perry_soil_series <- c("boswell", "faceville", "grady", "lucy","greenville","henderson", #based on SSURGO data
+                       "lakeland", "lynchburg","norfolk","oktibbeha","orangeburg","red bay","sumter","susquehanna","vaucluse","dothan","americus","hazelhurst","clarendon")
+osd_data <- fetchOSD(perry_soil_series, colorState = "moist")
+
+```
+
+```{r plot OSDs}
+
+plotOSDs <- plotSPC(osd_data, name.style = 'center-center', max.depth = 150) ; title('OSD around Perry Ga')
+
+```
+```{r}
+
+plotSPC(data_frame,
+        name = "hzid",
+        label = "point",
+        name.style = 'center-center',
+        color = "color") ; title('All profiles in Perry')
+
+subset_pedons <- subset(data_frame, point %in% c("80","78","57"))
+
+plotSPC(subset_pedons,
+        name = "hzid",
+        label = "point",
+        name.style = 'center-center',
+        color = "color") ; title('Points 57, 78, 80')
+
+
+
+
+subset_pedonse <- subset(data_frame, point %in% c("44"))
+
+plotSPC(subset_pedonse,
+        name = "hzid",
+        label = "point",
+        name.style = 'center-center',
+        color = "color") ; title('Point 44')
+
+soil_series_albany <- fetchOSD(soils = c("albany"))
+plot(soil_series_albany, name.style = 'center-center', max.depth = 150) ; title('albany')
+```
+
+```{r Plot clusters}
+# Subset specific IDs
+subset_pedons1 <- subset(data_frame, point %in% c("29","30","40"))
+
+# Plot the subset
+plot(subset_pedons1, 
+     name = "point",  # Label with texture
+     label = "color")      # Label profiles with ID
+
+# Subset specific IDs
+subset_pedons2 <- subset(data_frame, point %in% c("68","69","61","62","63"))
+
+# Plot the subset
+plot(subset_pedons2, 
+     name = "point",  # Label with texture
+     label = "color")      # Label profiles with ID
+
+
+
+# Step 1: Subset your pedons (e.g., "P1" and "44")
+subset_pedons3 <- subset(data_frame, id %in% c("44", "34","P4","23"))
+
+# Step 2: Fetch the "Grady" soil series data
+soil_series_grady <- fetchOSD(soils = c("Grady"))
+
+# Step 3: Create an empty plot and initialize
+plot(subset_pedons3, 
+     name = "point", 
+     label = "id", 
+     main = "Pedons P1 & 44 vs Grady Soil Series"
+     )
+
+# Now, add the "Grady" soil series to the plot
+plot(soil_series_grady)
+```
+
+
+```{r Soil Similarity func.}
+# Similarity function based on Euclidean distance
+calculate_similarity <- function(pedon, series_horizon) {
+  sqrt(
+    (pedon$sand - series_horizon$sand)^2 +
+    (pedon$silt - series_horizon$silt)^2 +
+    (pedon$clay - series_horizon$clay)^2)}
+
+
+```
+
+
+
+```{r Soil Series Match}
+# Initialize list to store matches
+matches <- list()
+
+# Loop through each pedon in your data
+for (i in unique(data_frame$id)) {
+  # Subset data for the current pedon
+  pedon <- data_frame %>% filter(id == i)
+  
+  # Calculate similarity for each soil series
+  similarities <- sapply(osd_data$horizons, function(series_horizon) {
+    mean(sapply(1:nrow(pedon), function(j) {
+      calculate_similarity(pedon[j, ], series_horizon)
+    }), na.rm = TRUE)
+  })
+  
+  # Find the best match
+  best_match <- names(which.min(similarities))
+  matches[[i]] <- best_match
+}
+
+# Create a data frame of matches
+matched_series <- data.frame(
+  id = names(matches),
+  best_match = unlist(matches)
+)
+
+print(matched_series)
+
+```
+
+```{r Network}
+# get basic OSD data for queried series and siblings
+s <- siblings('orangeburg', component.data = TRUE)
+s.list <- unique(c(s$sib$series[1], s$sib$sibling))
+h <- fetchOSD(s.list)
+
+# plot dendrogram + profiles
+SoilTaxonomyDendrogram(h, y.offset = 0.4, width = 0.3, name.style = 'center-center', depth.axis = list(line = -3))
+
+```
+
+
+```{r test}
+s2 <- siblings('orangeburg', component.data = TRUE)
+```
+
+

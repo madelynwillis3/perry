@@ -143,6 +143,9 @@ plotSPC(subset_pedonse,
 
 soil_series_albany <- fetchOSD(soils = c("albany"))
 plot(soil_series_albany, name.style = 'center-center', max.depth = 150) ; title('albany')
+
+soil_series_bonneau <- fetchOSD(soils = c("bonneau"))
+plot(soil_series_bonneau, name.style = 'center-center', max.depth = 150) ; title('Bonneau')
 ```
 
 ```{r Plot clusters}

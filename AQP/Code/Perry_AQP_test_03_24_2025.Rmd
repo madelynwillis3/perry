@@ -91,7 +91,7 @@ data_frame <- data_frame %>%
 #we dont have CF yet....
 
 data_frame <- data_frame %>%
-  select(point, id, hzid, top, bottom, texture, sand, silt, clay, color) %>% #column selection
+  dplyr::select(point, id, hzid, top, bottom, texture, sand, silt, clay, color) %>% #column selection
   arrange(point, id, hzid, top, bottom, texture, clay, sand, silt, color) #order
 
 aqp::depths(data_frame) <- point ~ top + bottom
@@ -142,7 +142,7 @@ plotSPC(subset_pedonse,
         color = "color") ; title('Point 44')
 
 soil_series_albany <- fetchOSD(soils = c("albany"))
-plot(soil_series_albany, name.style = 'center-center', max.depth = 150) ; title('albany')
+plot(soil_series_albany, name.style = 'center-center', max.depth = 150) ; title('Albany')
 
 soil_series_bonneau <- fetchOSD(soils = c("bonneau"))
 plot(soil_series_bonneau, name.style = 'center-center', max.depth = 150) ; title('Bonneau')
@@ -174,11 +174,10 @@ subset_pedons3 <- subset(data_frame, id %in% c("44", "34","P4","23"))
 soil_series_grady <- fetchOSD(soils = c("Grady"))
 
 # Step 3: Create an empty plot and initialize
-plot(subset_pedons3, 
-     name = "point", 
-     label = "id", 
-     main = "Pedons P1 & 44 vs Grady Soil Series"
-     )
+#plot(subset_pedons3, 
+#     name = "point", 
+#     label = "id", 
+#     main = "Pedons P1 & 44 vs Grady Soil Series")
 
 # Now, add the "Grady" soil series to the plot
 plot(soil_series_grady)

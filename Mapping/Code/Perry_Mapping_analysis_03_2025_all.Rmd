@@ -508,24 +508,25 @@ soil_points_sf_CID <- st_as_sf(soil_points_CID)
 soil_points_sp_CID <- as_Spatial(soil_points_sf_CID)
 
 #variograms:
-Vario <- function(nutrient,data, vgm) {
+VarioC <- function(nutrient,data, vgm) {
 nut_var<-variogram(nutrient,data = data) 
 nut_varfit <- fit.variogram(nut_var, model = vgm(vgm)) 
-plot(nut_var, nut_varfit, main = nutrient)}
+plot(nut_var, nut_varfit, main = nutrient, sub = "Composite")}
 
+VarioSP <- function(nutrient,data, vgm) {
+nut_var<-variogram(nutrient,data = data) 
+nut_varfit <- fit.variogram(nut_var, model = vgm(vgm)) 
+plot(nut_var, nut_varfit, main = nutrient, sub = "Single Point")}
 
 #kriging function:
 Krig <- function(nutrient,data, vgm) {
-  
 nut_var_C<-variogram(nutrient,data = data) 
 nut_varfit_C <- fit.variogram(nut_var_C, model = vgm(vgm)) 
-
 plot(nut_var_C, nut_varfit_C)
-
 nut_kriged_C<-krige(nutrient,data,grid_sp,model = nut_varfit_C) %>%
   st_as_sf() %>%
   vect()
-nut_kriged_raster_C <- rasterize(nut_kriged_C, covariates, field="var1.pred") }
+nut_kriged_raster_C <- rasterize(nut_kriged_C, covariates, field="var1.pred")}
 
 
 ```
@@ -534,19 +535,19 @@ nut_kriged_raster_C <- rasterize(nut_kriged_C, covariates, field="var1.pred") }
 ```{r Kriging CID}
 
 #all variograms:
-Vario(LBC.1~1,soil_points_sp_CID,"Nug")
-Vario(P~1,soil_points_sp_CID,"Lin")
-Vario(pH.2~1,soil_points_sp_CID,"Exp")
-Vario(Ca~1,soil_points_sp_CID,"Sph")
-Vario(K~1,soil_points_sp_CID,"Sph")
-Vario(Mg~1,soil_points_sp_CID,"Sph")
-Vario(Mn~1,soil_points_sp_CID,"Nug")
-Vario(Zn~1,soil_points_sp_CID,"Nug")
+VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
+VarioC(P~1,soil_points_sp_CID,"Lin")
+VarioC(pH.2~1,soil_points_sp_CID,"Exp")
+VarioC(Ca~1,soil_points_sp_CID,"Sph")
+VarioC(K~1,soil_points_sp_CID,"Sph")
+VarioC(Mg~1,soil_points_sp_CID,"Sph")
+VarioC(Mn~1,soil_points_sp_CID,"Nug")
+VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 #kriging: 
 
 #LBC:
-LBC_krig_C <- Krig(LBC.1~1,soil_points_sp_CID,"Nug")
+LBC_krig_C <- Krig(LBC.1~1,soil_points_sp_CID,"Sph")
 #P:
 P_krig_C <- Krig(P~1,soil_points_sp_CID,"Lin")
 #pH:
@@ -572,11 +573,6 @@ Mg_plot_krig_C <- plot(Mg_krig_C, main = "Mg Kriging Composite")
 Mn_plot_krig_C <- plot(Mn_krig_C, main = "Mn Kriging Composite") #no fit
 Zn_plot_krig_C <- plot(Zn_krig_C, main = "Zn Kriging Composite") #no fit
 
-
-
-
-
-
 ```
 
 ##Kriging Single point
@@ -588,14 +584,14 @@ soil_points_sf_SPID <- st_as_sf(soil_points_SPID)
 soil_points_sp_SPID <- as_Spatial(soil_points_sf_SPID)
 
 #all variograms:
-Vario(LBC.1~1,soil_points_sp_SPID,"Nug")
-Vario(P~1,soil_points_sp_SPID,"Sph")
-Vario(pH.2~1,soil_points_sp_SPID,"Exp")
-Vario(Ca~1,soil_points_sp_SPID,"Sph")
-Vario(K~1,soil_points_sp_SPID,"Sph")
-Vario(Mg~1,soil_points_sp_SPID,"Sph")
-Vario(Mn~1,soil_points_sp_SPID,"Nug")
-Vario(Zn~1,soil_points_sp_SPID,"Nug")
+VarioSP(LBC.1~1,soil_points_sp_SPID,"Nug")
+VarioSP(P~1,soil_points_sp_SPID,"Sph")
+VarioSP(pH.2~1,soil_points_sp_SPID,"Exp")
+VarioSP(Ca~1,soil_points_sp_SPID,"Sph")
+VarioSP(K~1,soil_points_sp_SPID,"Sph")
+VarioSP(Mg~1,soil_points_sp_SPID,"Sph")
+VarioSP(Mn~1,soil_points_sp_SPID,"Exp")
+VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
 #LBC:
 LBC_krig_SP <- Krig(LBC.1~1,soil_points_sp_SPID,"Nug")
 #P:
@@ -609,7 +605,7 @@ K_krig_SP <- Krig(K~1,soil_points_sp_SPID,"Sph")
 #Mg:
 Mg_krig_SP <- Krig(Mg~1,soil_points_sp_SPID,"Sph") #was nugget, now sph
 #Mn:
-Mn_krig_SP <- Krig(Mn~1,soil_points_sp_SPID,"Nug")
+Mn_krig_SP <- Krig(Mn~1,soil_points_sp_SPID,"Exp")
 #Zn
 Zn_krig_SP <- Krig(Zn~1,soil_points_sp_SPID,"Nug")
 
@@ -629,7 +625,33 @@ Zn_plot_krig_SP <- plot(Zn_krig_SP, main = "Zn Kriging Single Point") #no fit
 ```
 
 
-```{rcompare krig SP and C}
+```{r compare krig SP and C}
+
+#plotting all variograms:
+
+VarioSP(LBC.1~1,soil_points_sp_SPID,"Nug")
+VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
+
+VarioSP(P~1,soil_points_sp_SPID,"Sph")
+VarioC(P~1,soil_points_sp_CID,"Lin")
+
+VarioSP(pH.2~1,soil_points_sp_SPID,"Exp")
+VarioC(pH.2~1,soil_points_sp_CID,"Exp")
+
+VarioSP(Ca~1,soil_points_sp_SPID,"Sph")
+VarioC(Ca~1,soil_points_sp_CID,"Sph")
+
+VarioSP(K~1,soil_points_sp_SPID,"Sph")
+VarioC(K~1,soil_points_sp_CID,"Sph")
+
+VarioSP(Mg~1,soil_points_sp_SPID,"Sph")
+VarioC(Mg~1,soil_points_sp_CID,"Sph")
+
+VarioSP(Mn~1,soil_points_sp_SPID,"Exp")
+VarioC(Mn~1,soil_points_sp_CID,"Nug")
+
+VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
+VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 
 ```

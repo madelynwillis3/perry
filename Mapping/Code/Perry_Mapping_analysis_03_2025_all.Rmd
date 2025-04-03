@@ -34,6 +34,9 @@ library(parallel)
 library(caret)
 library(factoextra)
 library(corrplot)
+library(tidymodels)
+library(glmnet)
+library(vip)
 ```
 
 
@@ -297,26 +300,78 @@ fviz_contrib(PCA_covar, choice = "var", axes = 1:3)
 ```
 
 
+```{r train test + dist graphs}
+set.seed(626)
+
+list_train <- list()
+
+list_graph <- list()
+
+list_test <- list()
+
+for (i in 1:9) {
+  nutrient<- colnames(soils_df_wrang_SP[i])
+  set_split <- initial_split(soils_df_wrang_SP,prop = 0.8, strata = nutrient)
+  set_train <- training(set_split)
+  set_test <- testing(set_split) 
+  list_graph[[i]] <- ggplot() +
+  geom_density(data = set_train, 
+               aes(x = .data[[nutrient]]),
+               color = "red") +
+  geom_density(data = set_test, 
+               aes(x = .data[[nutrient]]),
+               color = "blue")
+  list_train[[i]] <- set_train
+  list_test[[i]] <- set_test
+}
+
+names<-colnames(soils_df_wrang_SP[1:9])
+
+names_train<-paste0(names,"_train")
+
+names_test<-paste0(names,"_test")
+
+names(list_train)<-names_train
+
+names(list_test)<-names_test
+
+list2env(c(list_train,list_test) ,.GlobalEnv)
+
+list_graph
+
+```
+
 
 ```{r Random Forest method}
 #seed:
 set.seed(626)
+
+# partition <- function(df, p, nutrient){
+#   
+#     set_split <- initial_split(df,prop = p, strata = nutrient)
+#     set_train <- training(set_split)
+#     
+#     set_test <- testing(set_split)
+#     ggplot() +
+#   geom_density(data = set_train, 
+#                aes(x = nutrient),
+#                color = "red") +
+#   geom_density(data = set_test, 
+#                aes(x = nutrient),
+#                color = "blue")} 
 
 #set train control:
 trainControl <- trainControl(method = "cv", number = 5)
 
 
 #LBC: NOT necessary as LBC is NOT spatially correlated
-
-
-LBC_df <- soils_df_wrang_SP %>%
+LBC_df <-  soils_df_wrang_SP %>%
   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
 LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
 
 LBC_df_train <- LBC_df[LBC_index_train,]
 LBC_df_test <- LBC_df[-LBC_index_train,]
-
 
 LBC_rf <- train(LBC.1 ~ ., data = LBC_df_train, method = "rf", trControl = trainControl)
 
@@ -328,6 +383,20 @@ LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
 
 plot(LBC_predict, main = "LBC RF")
 
+
+#LBC stratified:
+LBC_df_strata <-  LBC.1_train %>%
+  dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+LBC_rf_strata <- train(LBC.1 ~ ., data = LBC_df_strata, method = "rf", trControl = trainControl)
+
+print(LBC_rf_strata)
+
+predictors(LBC_rf_strata)
+
+LBC_predict_strata <- terra::predict(covariates, LBC_rf_strata, na.rm=TRUE)
+
+plot(LBC_predict_strata, main = "LBC RF Stratified")
 
 
 
@@ -354,6 +423,20 @@ pH_predict <- terra::predict(covariates, pH_rf, na.rm=TRUE)
 
 plot(pH_predict, main = "pH RF")
 
+
+#pH stratified:
+pH_df_strata <-  pH.2_train %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+pH_rf_strata <- train(pH.2 ~ ., data = pH_df_strata, method = "rf", trControl = trainControl)
+
+print(pH_rf_strata)
+
+predictors(pH_rf_strata)
+
+pH_predict_strata <- terra::predict(covariates, pH_rf_strata, na.rm=TRUE)
+
+plot(pH_predict_strata, main = "pH RF Stratified")
 
 
 #Ca:
@@ -484,6 +567,108 @@ predictors(Zn_rf)
 Zn_predict <- terra::predict(covariates, Zn_rf, na.rm=TRUE)
 
 plot(Zn_predict, main = "Zn RF")
+
+
+
+
+```
+```{r distributions of train and test}
+
+plotdist <- function(train, nutrient_train, test, nutrient_test) {
+  ggplot() +
+  geom_density(data = train, 
+               aes(x = nutrient_train),
+               color = "red") +
+  geom_density(data = test, 
+               aes(x = nutrient_test),
+               color = "blue") +
+    labs(title = "train vs test data, not stratified")
+}
+
+# stack_train <- c(LBC_df_train, pH_df_train, Ca_df_train, K_df_train, Mg_df_train, Mn_df_train, Zn_df_train)
+# stack_test<- c(LBC_df_test, pH_df_test, Ca_df_test, K_df_test, Mg_df_test, Mn_df_test, Zn_df_test)
+# 
+# for (i in length(stack_train))
+#   {plotdist([i], i$[i], [i], i$[i])}
+
+
+#LBC
+LBC_og_dist <- plotdist(LBC_df_train , LBC_df_train$LBC.1, LBC_df_test , LBC_df_test$LBC.1) #dissimilar
+#pH
+pH_og_dist <-plotdist(pH_df_train, pH_df_train$pH.2, pH_df_test, pH_df_test$pH.2)
+
+#Ca
+Cz_og_dist <-plotdist(Ca_df_train, Ca_df_train$Ca, Ca_df_test, Ca_df_test$Ca)
+
+#K
+K_og_dist <-plotdist(K_df_train, K_df_train$K, K_df_test, K_df_test$K)
+
+#Mg
+Mg_og_dist <-plotdist(Mg_df_train, Mg_df_train$Mg, Mg_df_test, Mg_df_test$Mg)
+
+#Mn
+Mn_og_dist <-plotdist(Mn_df_train, Mn_df_train$Mn, Mn_df_test, Mn_df_test$Mn) #dissimilar
+
+#P
+P_og_dist <-plotdist(P_df_train, P_df_train$P, P_df_test, P_df_test$P)
+
+#Zn
+Zn_og_dist <-plotdist(Zn_df_train, Zn_df_train$Zn, Zn_df_test, Zn_df_test$Zn)
+
+
+#plots:
+LBC_og_dist
+list_graph[[1]]
+
+```
+
+```{r finding out if unstrat or strat is better}
+compare_train_test_similarity <- function(train, test) {
+  # Compute density estimates
+  density_train <- density(train, na.rm = TRUE)
+  density_test <- density(test, na.rm = TRUE)
+  
+  # Define a common sequence of x-values spanning both densities
+  common_x <- seq(min(c(density_train$x, density_test$x)), 
+                  max(c(density_train$x, density_test$x)), 
+                  length.out = 100)
+  
+  # Interpolate densities at these common x-values
+  y_train <- approx(density_train$x, density_train$y, xout = common_x, rule = 2)$y
+  y_test <- approx(density_test$x, density_test$y, xout = common_x, rule = 2)$y
+  
+  # Compute Mean Absolute Difference (MAD)
+  mad_value <- mean(abs(y_train - y_test), na.rm = TRUE)
+  
+  # Compute Pearson correlation
+  correlation <- cor(y_train, y_test, use = "complete.obs")
+  
+  return(list(MAD = mad_value, Correlation = correlation))
+}
+
+similarity <- function(train, test, nutrient){
+# Compute similarity for original dataset (plotdist)
+similarity_original <- compare_train_test_similarity(train$nutrient, test$nutrient)
+
+# Compute similarity for list-based dataset (list_graph)
+similarity_list <- compare_train_test_similarity(list_train[["nutrient_train"]]$nutrient, 
+                                                     list_test[["nutrient_test"]]$nutrient)
+
+# Compare results
+similarity_original
+similarity_list
+
+# Interpretation
+if (similarity_original$MAD < similarity_list$MAD & 
+    similarity_original$Correlation > similarity_list$Correlation) {
+  print(nutrient + "The original test and train distributions are more similar.")
+} else {
+  print(nutrient + "The stratified test and train distributions are more similar.")
+}}
+
+LBC_dist_sim <- similarity(LBC_df_train, )
+
+
 
 
 

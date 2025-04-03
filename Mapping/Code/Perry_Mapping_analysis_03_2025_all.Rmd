@@ -384,7 +384,7 @@ LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
 plot(LBC_predict, main = "LBC RF")
 
 
-#LBC stratified:
+#LBC stratified: BETTER
 LBC_df_strata <-  LBC.1_train %>%
   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 

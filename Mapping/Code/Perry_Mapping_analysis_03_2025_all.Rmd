@@ -364,79 +364,79 @@ set.seed(626)
 trainControl <- trainControl(method = "cv", number = 5)
 
 
-#LBC: NOT necessary as LBC is NOT spatially correlated
-LBC_df <-  soils_df_wrang_SP %>%
-  dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
-
-LBC_index_train <- caret::createDataPartition(LBC_df$LBC.1, p = .8, list = F)
-
-LBC_df_train <- LBC_df[LBC_index_train,]
-LBC_df_test <- LBC_df[-LBC_index_train,]
-
-LBC_rf <- train(LBC.1 ~ ., data = LBC_df_train, method = "rf", trControl = trainControl)
-
-print(LBC_rf)
-
-predictors(LBC_rf)
-
-LBC_predict <- terra::predict(covariates, LBC_rf, na.rm=TRUE)
-
-plot(LBC_predict, main = "LBC RF")
+# #LBC: NOT necessary as LBC is NOT spatially correlated
+# LBC.1_df <-  soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+# 
+# LBC.1_index_train <- caret::createDataPartition(LBC.1_df$LBC.1, p = .8, list = F)
+# 
+# LBC.1_df_train <- LBC.1_df[LBC.1_index_train,]
+# LBC.1_df_test <- LBC.1_df[-LBC.1_index_train,]
+# 
+# LBC.1_rf <- train(LBC.1 ~ ., data = LBC.1_df_train, method = "rf", trControl = trainControl)
+# 
+# print(LBC.1_rf)
+# 
+# predictors(LBC.1_rf)
+# 
+# LBC.1_predict <- terra::predict(covariates, LBC.1_rf, na.rm=TRUE)
+# 
+# plot(LBC.1_predict, main = "LBC RF")
 
 
 #LBC stratified: BETTER
-LBC_df_strata <-  LBC.1_train %>%
+LBC.1_df_strata <-  LBC.1_train %>%
   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
-LBC_rf_strata <- train(LBC.1 ~ ., data = LBC_df_strata, method = "rf", trControl = trainControl)
+LBC.1_rf_strata <- train(LBC.1 ~ ., data = LBC.1_df_strata, method = "rf", trControl = trainControl)
 
-print(LBC_rf_strata)
+print(LBC.1_rf_strata)
 
-predictors(LBC_rf_strata)
+predictors(LBC.1_rf_strata)
 
-LBC_predict_strata <- terra::predict(covariates, LBC_rf_strata, na.rm=TRUE)
+LBC.1_predict_strata <- terra::predict(covariates, LBC.1_rf_strata, na.rm=TRUE)
 
-plot(LBC_predict_strata, main = "LBC RF Stratified")
+plot(LBC.1_predict_strata, main = "LBC RF Stratified")
 
 
 
 #pH
 
-pH_df <- soils_df_wrang_SP %>%
+pH.2_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 
-pH_index_train <- caret::createDataPartition(pH_df$pH.2, p = .8, list = F)
+pH.2_index_train <- caret::createDataPartition(pH.2_df$pH.2, p = .8, list = F)
 
-pH_df_train <- pH_df[pH_index_train,]
-pH_df_test <- pH_df[-pH_index_train,]
-
-
-
-pH_rf <- train(pH.2 ~ ., data = pH_df_train, method = "rf", trControl = trainControl)
-
-print(pH_rf)
-
-predictors(pH_rf)
+pH.2_df_train <- pH.2_df[pH.2_index_train,]
+pH.2_df_test <- pH.2_df[-pH.2_index_train,]
 
 
-pH_predict <- terra::predict(covariates, pH_rf, na.rm=TRUE)
 
-plot(pH_predict, main = "pH RF")
+pH.2_rf <- train(pH.2 ~ ., data = pH.2_df_train, method = "rf", trControl = trainControl)
+
+print(pH.2_rf)
+
+predictors(pH.2_rf)
 
 
-#pH stratified:
-pH_df_strata <-  pH.2_train %>%
-  dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+pH.2_predict <- terra::predict(covariates, pH.2_rf, na.rm=TRUE)
 
-pH_rf_strata <- train(pH.2 ~ ., data = pH_df_strata, method = "rf", trControl = trainControl)
+plot(pH.2_predict, main = "pH RF")
 
-print(pH_rf_strata)
 
-predictors(pH_rf_strata)
-
-pH_predict_strata <- terra::predict(covariates, pH_rf_strata, na.rm=TRUE)
-
-plot(pH_predict_strata, main = "pH RF Stratified")
+# #pH stratified:
+# pH.2_df_strata <-  pH.2_train %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+# 
+# pH.2_rf_strata <- train(pH.2 ~ ., data = pH.2_df_strata, method = "rf", trControl = trainControl)
+# 
+# print(pH.2_rf_strata)
+# 
+# predictors(pH.2_rf_strata)
+# 
+# pH.2_predict_strata <- terra::predict(covariates, pH.2_rf_strata, na.rm=TRUE)
+# 
+# plot(pH.2_predict_strata, main = "pH RF Stratified")
 
 
 #Ca:
@@ -505,74 +505,119 @@ Mg_predict <- terra::predict(covariates, Mg_rf, na.rm=TRUE)
 
 plot(Mg_predict, main = "Mg RF")
 
-#Mn:
+# #Mn:
+# 
+# Mn_df <- soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
+# 
+# Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
+# 
+# Mn_df_train <- Mn_df[Mn_index_train,]
+# Mn_df_test <- Mn_df[-Mn_index_train,]
+# 
+# 
+# Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
+# 
+# print(Mn_rf)
+# 
+# predictors(Mn_rf)
+# 
+# Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
+# 
+# plot(Mn_predict, main = "Mn RF")
 
-Mn_df <- soils_df_wrang_SP %>%
+#Mn stratified: BETTER
+Mn_df_strata <-  Mn_train %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
 
-Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
+Mn_rf_strata <- train(Mn ~ ., data = Mn_df_strata, method = "rf", trControl = trainControl)
 
-Mn_df_train <- Mn_df[Mn_index_train,]
-Mn_df_test <- Mn_df[-Mn_index_train,]
+print(Mn_rf_strata)
+
+predictors(Mn_rf_strata)
+
+Mn_predict_strata <- terra::predict(covariates, Mn_rf_strata, na.rm=TRUE)
+
+plot(Mn_predict_strata, main = "Mn RF Stratified")
 
 
-Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
+# #P:
+# 
+# P_df <- soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'Zn','x','y'))
+# 
+# P_index_train <- caret::createDataPartition(P_df$P, p = .8, list = F)
+# 
+# P_df_train <- P_df[P_index_train,]
+# P_df_test <- P_df[-P_index_train,]
+# 
+# 
+# P_rf <- train(P ~ ., data = P_df_train, method = "rf", trControl = trainControl)
+# 
+# print(P_rf)
+# 
+# predictors(P_rf)
+# 
+# P_predict <- terra::predict(covariates, P_rf, na.rm=TRUE)
+# 
+# plot(P_predict, main = "P RF")
 
-print(Mn_rf)
 
-predictors(Mn_rf)
-
-Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
-
-plot(Mn_predict, main = "Mn RF")
-
-#P:
-
-P_df <- soils_df_wrang_SP %>%
+#P stratified: BETTER
+P_df_strata <-  P_train %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'Zn','x','y'))
 
-P_index_train <- caret::createDataPartition(P_df$P, p = .8, list = F)
+P_rf_strata <- train(P ~ ., data = P_df_strata, method = "rf", trControl = trainControl)
 
-P_df_train <- P_df[P_index_train,]
-P_df_test <- P_df[-P_index_train,]
+print(P_rf_strata)
+
+predictors(P_rf_strata)
+
+P_predict_strata <- terra::predict(covariates, P_rf_strata, na.rm=TRUE)
+
+plot(P_predict_strata, main = "P RF Stratified")
 
 
-P_rf <- train(P ~ ., data = P_df_train, method = "rf", trControl = trainControl)
+# #Zn:
+# 
+# Zn_df <- soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P','x','y'))
+# 
+# Zn_index_train <- caret::createDataPartition(Zn_df$Zn, p = .8, list = F)
+# 
+# Zn_df_train <- Zn_df[Zn_index_train,]
+# Zn_df_test <- Zn_df[-Zn_index_train,]
+# 
+# 
+# Zn_rf <- train(Zn ~ ., data = Zn_df_train, method = "rf", trControl = trainControl)
+# 
+# print(Zn_rf)
+# 
+# predictors(Zn_rf)
+# 
+# Zn_predict <- terra::predict(covariates, Zn_rf, na.rm=TRUE)
+# 
+# plot(Zn_predict, main = "Zn RF")
 
-print(P_rf)
-
-predictors(P_rf)
-
-P_predict <- terra::predict(covariates, P_rf, na.rm=TRUE)
-
-plot(P_predict, main = "P RF")
-
-#Zn:
-
-Zn_df <- soils_df_wrang_SP %>%
+#Zn stratified: BETTER
+Zn_df_strata <-  Zn_train %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P','x','y'))
 
-Zn_index_train <- caret::createDataPartition(Zn_df$Zn, p = .8, list = F)
+Zn_rf_strata <- train(Zn ~ ., data = Zn_df_strata, method = "rf", trControl = trainControl)
 
-Zn_df_train <- Zn_df[Zn_index_train,]
-Zn_df_test <- Zn_df[-Zn_index_train,]
+print(Zn_rf_strata)
 
+predictors(Zn_rf_strata)
 
-Zn_rf <- train(Zn ~ ., data = Zn_df_train, method = "rf", trControl = trainControl)
+Zn_predict_strata <- terra::predict(covariates, Zn_rf_strata, na.rm=TRUE)
 
-print(Zn_rf)
-
-predictors(Zn_rf)
-
-Zn_predict <- terra::predict(covariates, Zn_rf, na.rm=TRUE)
-
-plot(Zn_predict, main = "Zn RF")
+plot(Zn_predict_strata, main = "Zn RF Stratified")
 
 
 
 
 ```
-```{r distributions of train and test}
+```{r distributions of train and test, eval = FALSE}
 
 plotdist <- function(train, nutrient_train, test, nutrient_test) {
   ggplot() +
@@ -616,63 +661,69 @@ P_og_dist <-plotdist(P_df_train, P_df_train$P, P_df_test, P_df_test$P)
 Zn_og_dist <-plotdist(Zn_df_train, Zn_df_train$Zn, Zn_df_test, Zn_df_test$Zn)
 
 
-#plots:
-LBC_og_dist
-list_graph[[1]]
+# #plots: example is LBC:
+# LBC_og_dist
+# list_graph[[1]]
 
 ```
 
-```{r finding out if unstrat or strat is better}
+```{r finding out if unstrat or strat is better, eval = FALSE}
+#function of similarity
 compare_train_test_similarity <- function(train, test) {
-  # Compute density estimates
   density_train <- density(train, na.rm = TRUE)
   density_test <- density(test, na.rm = TRUE)
-  
-  # Define a common sequence of x-values spanning both densities
-  common_x <- seq(min(c(density_train$x, density_test$x)), 
-                  max(c(density_train$x, density_test$x)), 
+
+  common_x <- seq(min(c(density_train$x, density_test$x)),
+                  max(c(density_train$x, density_test$x)),
                   length.out = 100)
-  
-  # Interpolate densities at these common x-values
+
   y_train <- approx(density_train$x, density_train$y, xout = common_x, rule = 2)$y
   y_test <- approx(density_test$x, density_test$y, xout = common_x, rule = 2)$y
-  
-  # Compute Mean Absolute Difference (MAD)
+
   mad_value <- mean(abs(y_train - y_test), na.rm = TRUE)
-  
-  # Compute Pearson correlation
   correlation <- cor(y_train, y_test, use = "complete.obs")
-  
+
   return(list(MAD = mad_value, Correlation = correlation))
 }
 
 similarity <- function(train, test, nutrient){
-# Compute similarity for original dataset (plotdist)
-similarity_original <- compare_train_test_similarity(train$nutrient, test$nutrient)
+  # Original
+  similarity_original <- compare_train_test_similarity(train[[nutrient]], test[[nutrient]])
+  
+  # Stratified
+  similarity_list <- compare_train_test_similarity(
+    list_train[[paste0(nutrient, "_train")]][[nutrient]], 
+    list_test[[paste0(nutrient, "_test")]][[nutrient]]
+  )
+  
+  # Print results
+  print(paste0("Results for ", nutrient, ":"))
+  print(similarity_original)
+  print(similarity_list)
+  
+  if (similarity_original$MAD < similarity_list$MAD & 
+      similarity_original$Correlation > similarity_list$Correlation) {
+    message(paste0(nutrient, ": The original test and train distributions are more similar."))
+  } else {
+    message(paste0(nutrient, ": The stratified test and train distributions are more similar."))
+  }
+  
+  return(list(
+    Nutrient = nutrient,
+    Original = similarity_original,
+    Stratified = similarity_list
+  ))
+}
 
-# Compute similarity for list-based dataset (list_graph)
-similarity_list <- compare_train_test_similarity(list_train[["nutrient_train"]]$nutrient, 
-                                                     list_test[["nutrient_test"]]$nutrient)
 
-# Compare results
-similarity_original
-similarity_list
+nutrients <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")  # skip LBC.eq
 
-# Interpretation
-if (similarity_original$MAD < similarity_list$MAD & 
-    similarity_original$Correlation > similarity_list$Correlation) {
-  print(nutrient + "The original test and train distributions are more similar.")
-} else {
-  print(nutrient + "The stratified test and train distributions are more similar.")
-}}
-
-LBC_dist_sim <- similarity(LBC_df_train, )
-
-
-
-
-
-
+all_results <- lapply(nutrients, function(nutrient) {
+  similarity(get(paste0(nutrient, "_df_train")),
+             get(paste0(nutrient, "_df_test")),
+             nutrient)
+})
+#LBC, Mn, P and Zn are all stratified
 ```
 
 
@@ -889,7 +940,8 @@ VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 #RF:
 
-rf_stack <- c(LBC_predict, pH_predict, Ca_predict, K_predict, Mg_predict, Mn_predict, P_predict, Zn_predict )
+rf_stack <- c(LBC.1_predict_strata, pH.2_predict, Ca_predict, K_predict, Mg_predict, Mn_predict_strata, P_predict_strata, Zn_predict_strata)
+names(rf_stack) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
 
 #Kriging:
 krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_raster, Mg_kriged_raster, Mn_kriged_raster, P_kriged_raster, Zn_kriged_raster)

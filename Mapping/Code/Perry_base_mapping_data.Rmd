@@ -1,0 +1,193 @@
+---
+title: "Perry_base_mapping_data"
+output: html_document
+---
+
+```{r Packages, include=FALSE}
+#chunk options
+  knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+library(tidyverse)
+library(raster)
+library(terra)
+library(ggplot2)
+library(viridis)
+library(corrr)
+library(rstac)
+library(ggcorrplot)
+library(GGally)
+library(randomForest)
+library(sp)
+library(gstat)
+library(automap)
+library(tmap)
+library(parallel)
+library(caret)
+library(factoextra)
+library(corrplot)
+library(tidymodels)
+library(glmnet)
+library(vip)
+```
+
+##Pulling Data/Imagery
+
+
+```{r Soil Samples}
+
+#Grabbing Sample ID's
+soil_points <- st_read("../Data/Samples/Perry_all points_17N/all_samples_points_perry_2.shp") %>%
+  pivot_longer(cols = c("CID","SPID"), names_to ="type", values_to = "ID")
+  
+
+#CSV of AESL data:
+soil_all <- read.csv("../Data/Samples/Perry_all_samples_all.csv")
+
+# Merge points + sample data:
+soil_points <- merge(soil_points, soil_all, by = "ID") #CID and SPID
+
+
+#write_csv(soil_points, "../Local Data- DO NOT PUSH/soil_points.csv")
+
+```
+
+
+
+
+
+
+```{r 1m DEM}
+
+# Load the USGS 1m DEM (acts as the template)
+USGS_DEM <- rast("../Data/USGS DEM/DEM rasters/output_USGS1m.tif")
+
+# border:
+border <- vect("../Data/Border/border_17N.shp") #points 124 and 136 are NOT within bounds. That's why we are using different border
+
+border_ext <-ext(border)
+
+# Crop and mask the DEM to the border extent
+clipped_DEM <- crop(USGS_DEM, border_ext) |> mask(border_ext)
+
+# Load all topographic rasters
+topo_files <- list.files("../Data/all rasters/", full.names = TRUE)
+topo_rasters <- lapply(topo_files, rast)
+
+# Function to align rasters (clip first, then resample to 1m)
+align_raster <- function(r, template, border_ext) {
+  # Reproject raster
+  if (crs(r) != crs(template)) {
+    r <- project(r, crs(template), method = "bilinear")
+  }
+  # Resample to match the clipped DEM's resolution
+  r <- resample(r, template, method = "bilinear")
+  # Crop and mask to the border_ext FIRST
+  r <- crop(r, border_ext) |> mask(border_ext)
+
+  return(r)
+}
+
+# Align all rasters
+aligned_rasters <- lapply(topo_rasters, align_raster, template = clipped_DEM, border = border_ext)
+
+# Stack aligned rasters
+clipped_stack <- terra::rast(aligned_rasters)
+
+# Summary check
+summary(clipped_stack)
+
+writeRaster(clipped_stack,filename=file.path("../Local Data- DO NOT PUSH/clipped_stack.tif"),overwrite=TRUE)
+
+```
+
+```{r Bare Soil}
+#planet bare soil imagery: 
+bare_soil <- rast("../Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
+#bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
+bare_soil_utm <- project(bare_soil,clipped_stack)
+#bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
+bare_soil_res1 <- project(bare_soil,clipped_stack)
+
+
+# SURFACE REFLECTANCE:
+
+reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Bands 1-4 
+                             2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
+
+# Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
+surface_reflectance <- bare_soil_res1
+for (i in 1:nlyr(bare_soil_res1)) { #for every band, multiply value by its band coefficient
+surface_reflectance[[i]] <- bare_soil_res1[[i]] * reflectanceCoefficients[i]
+}
+
+# Save new SR
+writeRaster(surface_reflectance, "../Output/Bare_soil/SR.tif", overwrite = TRUE)
+
+  # Plot random band:
+plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
+#plot(bare_soil_res1[[7]])
+
+SR_names<-array(dim = nlyr(surface_reflectance))
+
+for (i in 1:nlyr(surface_reflectance)){
+  SR_names[i]<-paste0("bare_soil_SR_band_",i)
+}
+
+names(surface_reflectance)<-SR_names
+
+#PCA: 
+
+princomp_SR <- terra::princomp(surface_reflectance)
+
+PCA_SR <- predict(surface_reflectance, princomp_SR, index = 1:2)
+
+#plot(PCA_SR)
+
+terra::writeRaster(PCA_SR, filename=file.path("../Local Data- DO NOT PUSH/PCA_SR.tif"), overwrite=TRUE)
+
+```
+
+```{r NDVI}
+
+# Veg data: Planet 
+Vegstack <- rast("../Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
+
+Vegstack_utm <- project(Vegstack,clipped_stack)
+
+
+#NDVI:
+
+
+NIR <- Vegstack_utm[[8]]  # NIR band
+Red <- Vegstack_utm[[6]]  # Red band
+
+# formula
+NDVI <- (NIR - Red) / (NIR + Red)
+
+names(NDVI)<- "NDVI"
+
+# Plot NDVI
+plot(NDVI)
+
+
+#SAVI: 
+
+
+L <- 0.5  # adjustable
+
+# formula
+SAVI <- ((NIR - Red) / (NIR + Red + L)) * (1 + L)
+
+names(SAVI)<- "SAVI"
+
+
+# Plot SAVI
+plot(SAVI)
+
+
+terra::writeRaster(NDVI, filename=file.path("../Local Data- DO NOT PUSH/NDVI.tif"), overwrite = TRUE)
+
+```
+
+
+

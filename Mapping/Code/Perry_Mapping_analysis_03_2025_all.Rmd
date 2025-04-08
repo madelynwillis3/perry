@@ -39,160 +39,42 @@ library(glmnet)
 library(vip)
 ```
 
+##Pulling Data & Imagery
 
-##Pulling Data/Imagery
 
-
-```{r Soil Samples}
-
+```{r ALL data pull, message = FALSE}
 #Grabbing Sample ID's
-soil_points <- st_read("../Data/Samples/Perry_all points_17N/all_samples_points_perry_2.shp") %>%
+soil_points <- st_read("../Local Data- DO NOT PUSH/Perry_all points_17N/all_samples_points_perry_2.shp") %>%
   pivot_longer(cols = c("CID","SPID"), names_to ="type", values_to = "ID")
   
 
 #CSV of AESL data:
-soil_all <- read.csv("../Data/Samples/Perry_all_samples_all.csv")
+soil_all <- read.csv("../Local Data- DO NOT PUSH/Perry_all_samples_all.csv")
 
 # Merge points + sample data:
 soil_points <- merge(soil_points, soil_all, by = "ID") #CID and SPID
 
 
-```
-
-
-
-
-
-
-```{r 1m DEM}
+write_csv(soil_points, "../Local Data- DO NOT PUSH/soil_points.csv")
 
 # Load the USGS 1m DEM (acts as the template)
-USGS_DEM <- rast("../Data/USGS DEM/DEM rasters/output_USGS1m.tif")
+USGS_DEM <- rast("../Local Data- DO NOT PUSH/DEM rasters/output_USGS1m.tif")
 
 # border:
-border <- vect("../Data/Border/border_17N.shp") #points 124 and 136 are NOT within bounds. That's why we are using different border
-
+border <- vect("../Local Data- DO NOT PUSH/Border/border_17N.shp") #points 124 and 136 are NOT within bounds. That's why we are using different border
 border_ext <-ext(border)
 
+#topo stack:
+clipped_stack <- terra::rast("../Local Data- DO NOT PUSH/clipped_stack.tif") 
 
-
-
-# Crop and mask the DEM to the border extent
-clipped_DEM <- crop(USGS_DEM, border_ext) |> mask(border_ext)
-
-# Load all topographic rasters
-topo_files <- list.files("../Data/all rasters/", full.names = TRUE)
-topo_rasters <- lapply(topo_files, rast)
-
-# Function to align rasters (clip first, then resample to 1m)
-align_raster <- function(r, template, border_ext) {
-  # Reproject raster
-  if (crs(r) != crs(template)) {
-    r <- project(r, crs(template), method = "bilinear")
-  }
-  # Resample to match the clipped DEM's resolution
-  r <- resample(r, template, method = "bilinear")
-  # Crop and mask to the border_ext FIRST
-  r <- crop(r, border_ext) |> mask(border_ext)
-
-  return(r)
-}
-
-# Align all rasters
-aligned_rasters <- lapply(topo_rasters, align_raster, template = clipped_DEM, border = border_ext)
-
-# Stack aligned rasters
-clipped_stack <- terra::rast(aligned_rasters)
-
-# Summary check
-summary(clipped_stack)
-
-
-```
-
-```{r Bare Soil}
-#planet bare soil imagery: 
-bare_soil <- rast("../Data/Planet/Bare Soil Imagery/Apr 2022/20220429_152053_57_245c_3B_udm2_clip_projected.tif")
-#bare_soil_wgs84 <- project(bare_soil, "EPSG:4326", res = 1, method = "bilinear") #doesn't work
-bare_soil_utm <- project(bare_soil,clipped_stack)
-#bare_soil_res1 <- terra::resample(bare_soil_utm, clipped_stack)
-bare_soil_res1 <- project(bare_soil,clipped_stack)
-
-
-# SURFACE REFLECTANCE:
-
-reflectanceCoefficients <- c(2.028e-05, 1.959e-05, 2.094e-05, 2.124e-05,  # Bands 1-4 
-                             2.018e-05, 1.511e-05, 1.372e-05, 1.092e-05)  # Bands 5-8 
-
-# Apply band-specific reflectance coefficients (not sure if Planet already corrected for SR)
-surface_reflectance <- bare_soil_res1
-for (i in 1:nlyr(bare_soil_res1)) { #for every band, multiply value by its band coefficient
-surface_reflectance[[i]] <- bare_soil_res1[[i]] * reflectanceCoefficients[i]
-}
-
-# Save new SR
-writeRaster(surface_reflectance, "../Output/Bare_soil/SR.tif", overwrite = TRUE)
-
-  # Plot random band:
-plot(surface_reflectance[[7]], main = "NIR1 Surface Reflectance")
-#plot(bare_soil_res1[[7]])
-
-SR_names<-array(dim = nlyr(surface_reflectance))
-
-for (i in 1:nlyr(surface_reflectance)){
-  SR_names[i]<-paste0("bare_soil_SR_band_",i)
-}
-
-names(surface_reflectance)<-SR_names
-
-#PCA: 
-
-princomp_SR <- terra::princomp(surface_reflectance)
-
-PCA_SR <- predict(surface_reflectance, princomp_SR, index = 1:2)
-
-#plot(PCA_SR)
-
-```
-
-```{r NDVI}
-
-# Veg data: Planet 
-Vegstack <- rast("../Data/Planet/Veg Imagery/Sept 2022/20220921_152148_44_2465_3B_AnalyticMS_SR_8b_clip.tif")
-
-Vegstack_utm <- project(Vegstack,clipped_stack)
-
+#surface reflectance run through PCA:
+PCA_SR <- terra::rast("../Local Data- DO NOT PUSH/PCA_SR.tif") 
 
 #NDVI:
-
-
-NIR <- Vegstack_utm[[8]]  # NIR band
-Red <- Vegstack_utm[[6]]  # Red band
-
-# formula
-NDVI <- (NIR - Red) / (NIR + Red)
-
-names(NDVI)<- "NDVI"
-
-# Plot NDVI
-plot(NDVI)
-
-
-#SAVI: 
-
-
-L <- 0.5  # adjustable
-
-# formula
-SAVI <- ((NIR - Red) / (NIR + Red + L)) * (1 + L)
-
-names(SAVI)<- "SAVI"
-
-
-# Plot SAVI
-plot(SAVI)
+NDVI <- terra::rast("../Local Data- DO NOT PUSH/NDVI.tif") 
 
 ```
+
 
 
 
@@ -278,8 +160,9 @@ cor_matrix_soil_topo_SP <- cor(soils_df_wrang_SP[, soil_vars], soils_df_wrang_SP
 # Visualize
 ggcorrplot(cor_matrix_soil_topo_SP, lab = TRUE, show.legend = TRUE, 
            tl.cex = 5, lab_size = 2, tl.srt = 45, method = "circle")
+
 #save png of corr matrix
-ggsave("../Mapping/Output/Correlation_Matrix_all.png")
+#ggsave("../Mapping/Output/Correlation_Matrix_all.png")
 
 ```
 ###PCA
@@ -294,8 +177,9 @@ PCA_var <- get_pca_var(PCA_data)
 fviz_pca_var(PCA_covar, col.var = "cos2")
 
 fviz_contrib(PCA_covar, choice = "var", axes = 1:3)
-
-
+#?
+PCA_<-PCA_covar$sdev^2
+write.csv(PCA_,file="../Local Data- DO NOT PUSH/PCA_covar.csv")
 
 ```
 
@@ -337,11 +221,10 @@ names(list_test)<-names_test
 
 list2env(c(list_train,list_test) ,.GlobalEnv)
 
-list_graph
 
 ```
 
-
+###RF
 ```{r Random Forest method}
 #seed:
 set.seed(626)
@@ -364,7 +247,7 @@ set.seed(626)
 trainControl <- trainControl(method = "cv", number = 5)
 
 
-# #LBC: NOT necessary as LBC is NOT spatially correlated
+# # #LBC: NOT necessary as LBC is NOT spatially correlated
 # LBC.1_df <-  soils_df_wrang_SP %>%
 #   dplyr::select(-c('LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 # 
@@ -398,7 +281,7 @@ LBC.1_predict_strata <- terra::predict(covariates, LBC.1_rf_strata, na.rm=TRUE)
 
 plot(LBC.1_predict_strata, main = "LBC RF Stratified")
 
-
+terra::writeRaster(LBC.1_predict_strata, "../Local Data- DO NOT PUSH/LBC.1_predict_strata.tif")
 
 #pH
 
@@ -423,8 +306,9 @@ pH.2_predict <- terra::predict(covariates, pH.2_rf, na.rm=TRUE)
 
 plot(pH.2_predict, main = "pH RF")
 
+terra::writeRaster(pH.2_predict, "../Local Data- DO NOT PUSH/pH.2_predict.tif")
 
-# #pH stratified:
+# # #pH stratified:
 # pH.2_df_strata <-  pH.2_train %>%
 #   dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 # 
@@ -460,7 +344,21 @@ Ca_predict <- terra::predict(covariates, Ca_rf, na.rm=TRUE)
 
 plot(Ca_predict, main = "Ca RF")
 
+terra::writeRaster(Ca_predict, "../Local Data- DO NOT PUSH/Ca_predict.tif")
 
+# #Ca stratified:
+# Ca_df_strata <-  Ca_train %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+# 
+# Ca_rf_strata <- train(Ca ~ ., data = Ca_df_strata, method = "rf", trControl = trainControl)
+# 
+# print(Ca_rf_strata)
+# 
+# predictors(Ca_rf_strata)
+# 
+# Ca_predict_strata <- terra::predict(covariates, Ca_rf_strata, na.rm=TRUE)
+# 
+# plot(Ca_predict_strata, main = "Ca RF Stratified")
 
 #K:
 
@@ -483,6 +381,22 @@ K_predict <- terra::predict(covariates, K_rf, na.rm=TRUE)
 
 plot(K_predict, main = "K RF")
 
+terra::writeRaster(K_predict, "../Local Data- DO NOT PUSH/K_predict.tif")
+
+
+# #K stratified:
+# K_df_strata <-  K_train %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+# 
+# K_rf_strata <- train(K ~ ., data = K_df_strata, method = "rf", trControl = trainControl)
+# 
+# print(K_rf_strata)
+# 
+# predictors(K_rf_strata)
+# 
+# K_predict_strata <- terra::predict(covariates, K_rf_strata, na.rm=TRUE)
+# 
+# plot(K_predict_strata, main = "K RF Stratified")
 
 #Mg:
 
@@ -505,40 +419,55 @@ Mg_predict <- terra::predict(covariates, Mg_rf, na.rm=TRUE)
 
 plot(Mg_predict, main = "Mg RF")
 
-# #Mn:
-# 
-# Mn_df <- soils_df_wrang_SP %>%
-#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
-# 
-# Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
-# 
-# Mn_df_train <- Mn_df[Mn_index_train,]
-# Mn_df_test <- Mn_df[-Mn_index_train,]
-# 
-# 
-# Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
-# 
-# print(Mn_rf)
-# 
-# predictors(Mn_rf)
-# 
-# Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
-# 
-# plot(Mn_predict, main = "Mn RF")
+#Mg stratified:
 
-#Mn stratified: BETTER
-Mn_df_strata <-  Mn_train %>%
+# Mg_df_strata <-  Mn_train %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
+# 
+# Mg_rf_strata <- train(Mg ~ ., data = Mg_df_strata, method = "rf", trControl = trainControl)
+# 
+# print(Mg_rf_strata)
+# 
+# predictors(Mg_rf_strata)
+# 
+# Mg_predict_strata <- terra::predict(covariates, Mg_rf_strata, na.rm=TRUE)
+# 
+# plot(Mg_predict_strata, main = "Mg RF Stratified")
+
+# #Mn:
+
+Mn_df <- soils_df_wrang_SP %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
 
-Mn_rf_strata <- train(Mn ~ ., data = Mn_df_strata, method = "rf", trControl = trainControl)
+Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
 
-print(Mn_rf_strata)
+Mn_df_train <- Mn_df[Mn_index_train,]
+Mn_df_test <- Mn_df[-Mn_index_train,]
 
-predictors(Mn_rf_strata)
 
-Mn_predict_strata <- terra::predict(covariates, Mn_rf_strata, na.rm=TRUE)
+Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
 
-plot(Mn_predict_strata, main = "Mn RF Stratified")
+print(Mn_rf)
+
+predictors(Mn_rf)
+
+Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
+
+plot(Mn_predict, main = "Mn RF")
+
+# #Mn stratified:
+# Mn_df_strata <-  Mn_train %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
+# 
+# Mn_rf_strata <- train(Mn ~ ., data = Mn_df_strata, method = "rf", trControl = trainControl)
+# 
+# print(Mn_rf_strata)
+# 
+# predictors(Mn_rf_strata)
+# 
+# Mn_predict_strata <- terra::predict(covariates, Mn_rf_strata, na.rm=TRUE)
+# 
+# plot(Mn_predict_strata, main = "Mn RF Stratified")
 
 
 # #P:
@@ -578,7 +507,28 @@ P_predict_strata <- terra::predict(covariates, P_rf_strata, na.rm=TRUE)
 plot(P_predict_strata, main = "P RF Stratified")
 
 
-# #Zn:
+  # #p CID adjusted with points
+  # P_predict_adjusted_C <- P_predict_strata
+  # 
+  # soil_points_sf_CID <- st_as_sf(soil_points_CID, coords = c("x", "y"), crs = st_crs(covariates))
+  # 
+  # coords <- st_coordinates(soil_points_sf_CID)
+  # P_predict_adjusted_C[terra::cellFromXY(P_predict_strata, coords)] <- soil_points_sf_CID$P
+  # 
+  # plot(P_predict_adjusted_C)
+  
+  
+    #p SPID adjusted with points
+  P_predict_adjusted_SP <- P_predict_strata
+  
+  soil_points_sf_SPID <- st_as_sf(soil_points_SPID, coords = c("x", "y"), crs = st_crs(covariates))
+  
+  coords <- st_coordinates(soil_points_sf_SPID)
+  P_predict_adjusted_SP[terra::cellFromXY(P_predict_strata, coords)] <- soil_points_sf_SPID$P
+  
+  plot(P_predict_adjusted_SP)
+
+#Zn:
 # 
 # Zn_df <- soils_df_wrang_SP %>%
 #   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P','x','y'))
@@ -638,9 +588,9 @@ plotdist <- function(train, nutrient_train, test, nutrient_test) {
 
 
 #LBC
-LBC_og_dist <- plotdist(LBC_df_train , LBC_df_train$LBC.1, LBC_df_test , LBC_df_test$LBC.1) #dissimilar
+LBC_og_dist <- plotdist(LBC.1_df_train , LBC.1_df_train$LBC.1, LBC.1_df_test , LBC.1_df_test$LBC.1) #dissimilar
 #pH
-pH_og_dist <-plotdist(pH_df_train, pH_df_train$pH.2, pH_df_test, pH_df_test$pH.2)
+pH_og_dist <-plotdist(pH.2_df_train, pH.2_df_train$pH.2, pH.2_df_test, pH.2_df_test$pH.2)
 
 #Ca
 Cz_og_dist <-plotdist(Ca_df_train, Ca_df_train$Ca, Ca_df_test, Ca_df_test$Ca)
@@ -723,7 +673,7 @@ all_results <- lapply(nutrients, function(nutrient) {
              get(paste0(nutrient, "_df_test")),
              nutrient)
 })
-#LBC, Mn, P and Zn are all stratified
+#LBC, P and Zn are all stratified
 ```
 
 
@@ -770,20 +720,20 @@ nut_kriged_raster_C <- rasterize(nut_kriged_C, covariates, field="var1.pred")}
 ##Kriging Composite
 ```{r Kriging CID}
 
-#all variograms:
-VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
-VarioC(P~1,soil_points_sp_CID,"Lin")
-VarioC(pH.2~1,soil_points_sp_CID,"Exp")
-VarioC(Ca~1,soil_points_sp_CID,"Sph")
-VarioC(K~1,soil_points_sp_CID,"Sph")
-VarioC(Mg~1,soil_points_sp_CID,"Sph")
-VarioC(Mn~1,soil_points_sp_CID,"Nug")
-VarioC(Zn~1,soil_points_sp_CID,"Nug")
+# #all variograms:
+# VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
+# VarioC(P~1,soil_points_sp_CID,"Lin")
+# VarioC(pH.2~1,soil_points_sp_CID,"Exp")
+# VarioC(Ca~1,soil_points_sp_CID,"Sph")
+# VarioC(K~1,soil_points_sp_CID,"Sph")
+# VarioC(Mg~1,soil_points_sp_CID,"Sph")
+# VarioC(Mn~1,soil_points_sp_CID,"Nug")
+# VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 #kriging: 
 
 #LBC:
-LBC_krig_C <- Krig(LBC.1~1,soil_points_sp_CID,"Sph")
+LBC_krig_C <- Krig(LBC.1~1,soil_points_sp_CID,"Sph") #ehh. Not really a fit. Nugget-esque.
 #P:
 P_krig_C <- Krig(P~1,soil_points_sp_CID,"Lin")
 #pH:
@@ -819,7 +769,7 @@ Zn_plot_krig_C <- plot(Zn_krig_C, main = "Zn Kriging Composite") #no fit
 soil_points_sf_SPID <- st_as_sf(soil_points_SPID) 
 soil_points_sp_SPID <- as_Spatial(soil_points_sf_SPID)
 
-#all variograms:
+# #all variograms:
 VarioSP(LBC.1~1,soil_points_sp_SPID,"Nug")
 VarioSP(P~1,soil_points_sp_SPID,"Sph")
 VarioSP(pH.2~1,soil_points_sp_SPID,"Exp")
@@ -828,6 +778,8 @@ VarioSP(K~1,soil_points_sp_SPID,"Sph")
 VarioSP(Mg~1,soil_points_sp_SPID,"Sph")
 VarioSP(Mn~1,soil_points_sp_SPID,"Exp")
 VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
+
+
 #LBC:
 LBC_krig_SP <- Krig(LBC.1~1,soil_points_sp_SPID,"Nug")
 #P:
@@ -881,10 +833,10 @@ VarioSP(K~1,soil_points_sp_SPID,"Sph")
 VarioC(K~1,soil_points_sp_CID,"Sph")
 
 VarioSP(Mg~1,soil_points_sp_SPID,"Sph")
-VarioC(Mg~1,soil_points_sp_CID,"Sph")
+VarioC(Mg~1,soil_points_sp_CID,"Exp")
 
 VarioSP(Mn~1,soil_points_sp_SPID,"Exp")
-VarioC(Mn~1,soil_points_sp_CID,"Nug")
+VarioC(Mn~1,soil_points_sp_CID,"Lin")
 
 VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
 VarioC(Zn~1,soil_points_sp_CID,"Nug")
@@ -894,29 +846,7 @@ VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 
 
-```{r adjusted P}
-  #p CID adjusted with points
-  P_predict_adjusted_C <- P_predict
-  
-  soil_points_sf <- st_as_sf(soil_points_CID, coords = c("x", "y"), crs = st_crs(covariates))
-  
-  coords <- st_coordinates(soil_points_sf_CID)
-  P_predict_adjusted_C[terra::cellFromXY(P_predict, coords)] <- soil_points_sf_CID$P
-  
-  plot(P_predict_adjusted)
-  
-  
-    #p SPID adjusted with points
-  P_predict_adjusted_SP <- P_predict
-  
-  soil_points_sf <- st_as_sf(soil_points_SPID, coords = c("x", "y"), crs = st_crs(covariates))
-  
-  coords <- st_coordinates(soil_points_sf_SPID)
-  P_predict_adjusted_SP[terra::cellFromXY(P_predict, coords)] <- soil_points_sf_SPID$P
-  
-  plot(P_predict_adjusted)
 
-```
 
 
 
@@ -940,12 +870,17 @@ VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 #RF:
 
-rf_stack <- c(LBC.1_predict_strata, pH.2_predict, Ca_predict, K_predict, Mg_predict, Mn_predict_strata, P_predict_strata, Zn_predict_strata)
+rf_stack <- rast(c(LBC.1_predict_strata, pH.2_predict, Ca_predict, K_predict, Mg_predict, Mn_predict_strata, P_predict_strata, Zn_predict_strata))
 names(rf_stack) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
 
 #Kriging:
-krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_raster, Mg_kriged_raster, Mn_kriged_raster, P_kriged_raster, Zn_kriged_raster)
 
+#composite:
+krig_stack_C <- rast(c(LBC_krig_C, pH_krig_C, Ca_krig_C, K_krig_C, Mg_krig_C, Mn_krig_C, P_krig_C, Zn_krig_C))
+names(krig_stack_C) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+#single point:
+krig_stack_SP <- rast(c(LBC_krig_SP, pH_krig_SP, Ca_krig_SP, K_krig_SP, Mg_krig_SP, Mn_krig_SP, P_krig_SP, Zn_krig_SP))
+names(krig_stack_SP) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
 ```
 
 
@@ -953,6 +888,10 @@ krig_stack <- c(LBC_kriged_raster, pH_kriged_raster, Ca_kriged_raster, K_kriged_
 
 ```{r classify P}
 
+#clip:
+
+P_rf_clip_strata <- terra::mask(P_predict_strata, border)
+P_krig_clip_strata <- terra::mask(P_krig_SP, border)
 
 #"Low P (0-30 lbs/A)" Apply 140 lbs of P205 per acre
 #"Medium P (31-60 lbs/A)" Apply 105 lbs of P205 per acre
@@ -971,8 +910,8 @@ P_class_matrix <- cbind(P_classes[-length(P_classes)], P_classes[-1], P_labels)
 
 
 # Classify P rasters
-P_predict_classified <- classify(P_predict, P_class_matrix)
-P_kriged_classified <- classify(P_kriged_raster, P_class_matrix)
+P_predict_classified <- classify(P_rf_clip_strata, P_class_matrix)
+P_kriged_classified <- classify(P_krig_clip_strata, P_class_matrix)
 
 
 # Assign category labels
@@ -986,78 +925,85 @@ levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
 
 
 par(mfrow = c(2,2))
-#RF
-plot(P_predict_classified, main = "Classified P (RF Prediction)")
-
-
-
-#Kriging
-plot(P_kriged_classified, main = "Classified P (Kriging)")
-
-#adjusted P
-
-
-# Classify P rasters #P adjusted is just forcing the soil points in
-P_predict_classified_adjust <- classify(P_predict_adjusted, P_class_matrix)
-
+  #adjusted P
+  
+  
+  # Classify P rasters #P adjusted is just forcing the soil points in
+  
+  #P_predict_classified_adjust <- classify(P_predict_adjusted_SP, P_class_matrix)
 
 
 # Assign category labels  for P:
 
 # Convert rasters to categorical factors
-levels(P_predict_classified_adjust) <- data.frame(ID = 1:4, category = P_labels_factor)
+levels(P_predict_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
 levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
 
-#RF
-plot(P_predict_classified_adjust, main = "Classified P (RF Prediction)")
 
+par(mfrow = c(2,2))
+#RF
+plot(P_predict_classified, main = "Classified P (RF Prediction)")
+#Kriging
+plot(P_kriged_classified, main = "Classified P (Kriging)")
 
 
 ```
 
 
 ```{r Classify K}
+#mask:
+K_rf_clip_strata <- terra::mask(K_predict, border)
+K_krig_clip_strata <- terra::mask(K_krig_C, border)
 
 # Define breaks and corresponding labels for Potassium (in ppm)
-K_classes <- c(0, 30, 75, 125, Inf)  # Breakpoints
+K_classes <- c(0, 60, 150, 250, Inf)  # Breakpoints
 K_labels <- c(1, 2, 3, 4)  # Assign numeric labels
 
+K_class_matrix <- cbind(K_classes[-length(K_classes)], K_classes[-1], K_labels)
 
 # Classify K rasters
-K_predict_classified <- classify(K_predict, K_class_matrix)
-K_kriged_classified <- classify(K_kriged_raster, K_class_matrix)
+K_predict_classified <- classify(K_rf_clip_strata, K_class_matrix)
+K_kriged_classified <- classify(K_krig_clip_strata, K_class_matrix)
+
+K_labels_factor <- c("Low K: (0-60 lbs/A)", "Medium K: (61-150 lbs/A)", "High K (151-250 lbs/A)", "Very High K (250+ lbs/A)")
 
 levels(K_predict_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
 levels(K_kriged_classified) <- data.frame(ID = 1:4, category = K_labels_factor)
 
-plot(K_predict_classified, main = "Classified K (RF Prediction)")
+#custom colors
+custom_colors <- viridis(3, option="D")
 
-plot(K_kriged_classified, main = "Classified K (Kriging)")
+par(mfrow = c(2,2))
+plot(K_predict_classified, main = "Classified K (RF Prediction)", col =custom_colors)
+
+plot(K_kriged_classified, main = "Classified K (Kriging)", col=custom_colors)
 ```
 
 ```{r pH}
 
 # Create a lookup table for lime requirements (lbs/acre)
+
+#BASED ON LIME TABLE C:
 lime_table <- tibble(
-  pH = c(5.9, 5.8, 5.7, 5.6, 5.5, 5.4, 5.3, 5.2),
-  LBC_100 = c(1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000),
-  LBC_200 = c(1000, 1000, 1000, 1000, 1000, 1500, 1500, 2000),
-  LBC_300 = c(1000, 1000, 1000, 1500, 2000, 2000, 2500, 3000),
-  LBC_400 = c(1000, 1000, 1500, 2000, 2500, 3000, 3500, 4000),
-  LBC_500 = c(1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000),
-  LBC_600 = c(1000, 1500, 2500, 3000, 3500, 4500, 5000, 5500),
-  LBC_700 = c(1000, 2000, 3000, 3500, 4000, 5000, 6000, 6500),
-  LBC_800 = c(1000, 2000, 3000, 4000, 5000, 5500, 6500, 7500),
-  LBC_900 = c(1000, 2500, 3500, 4500, 5500, 6500, 7500, 8500),
-  LBC_1000 = c(1500, 2500, 3500, 5000, 6000, 7000, 8500, 9500),
-  LBC_1100 = c(1500, 3000, 4000, 5500, 6500, 8000, 9000, 10000),
-  LBC_1200 = c(1500, 3000, 4500, 5500, 7000, 8500, 10000, 10000),
-  LBC_1300 = c(1500, 3500, 4500, 6000, 7500, 9000, 10000, 10000),
-  LBC_1400 = c(2000, 3500, 5000, 6500, 8500, 10000, 10000, 10000)
+  pH = c(5.9, 5.8, 5.7, 5.6, 5.5, 5.4, 5.3, 5.2, 5.1, 5.0, 4.9, 4.8, 4.7, 4.6, 4.5, 4.4, 4.3, 4.2, 4.1, 4.0),
+  LBC_100  = c(1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1500, 1500, 1500, 1500, 1500),
+  LBC_200  = c(1000, 1000, 1000, 1000, 1000, 1500, 1500, 2000, 2000, 2500, 2500, 3000, 3000, 3000, 3500, 3500, 4000, 4000, 4500, 4500),
+  LBC_300  = c(1000, 1000, 1000, 1500, 2000, 2000, 2500, 3000, 3500, 3500, 4000, 4500, 4500, 5000, 5500, 5500, 6000, 6500, 7000, 7000),
+  LBC_400  = c(1000, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500),
+  LBC_500  = c(1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000, 5500, 6000, 6500, 7000, 7500, 8500, 9000, 9500, 10000, 10000, 10000, 10000),
+  LBC_600  = c(1000, 1500, 2000, 3000, 3500, 4500, 5000, 5500, 6500, 7000, 8000, 8500, 9000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_700  = c(1000, 2000, 2500, 3500, 4000, 5000, 6000, 6500, 7500, 8500, 9000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_800  = c(1000, 2000, 3000, 4000, 5000, 5500, 6500, 7500, 8500, 9500, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_900  = c(1000, 2000, 3500, 4500, 5500, 6500, 7500, 8500, 9500, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_1000 = c(1500, 2500, 3500, 5000, 6000, 7000, 8500, 9500, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_1100 = c(1500, 2500, 4000, 5500, 6500, 8000, 9000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_1200 = c(1500, 3000, 4500, 5500, 7000, 8500, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_1300 = c(1500, 3000, 4500, 6000, 7500, 9000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000),
+  LBC_1400 = c(2000, 3500, 5000, 6500, 8500, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000)
 )
 
 # Convert lbs/acre to ppm
-lime_table[-1] <- lime_table[-1] / 2  # Since 1 ppm ≈ 2 lbs/acre
+lime_table[-1] <- lime_table[-1] / 2  # Since 1 ppm ≈ 2 lbs/acre, minus the pH row 
 
 # Function to classify lime requirement
 classify_lime <- function(pH, LBC) {
@@ -1075,8 +1021,8 @@ classify_lime <- function(pH, LBC) {
 
 
 # Apply to rasters
-LBC_pH_stack <- c(LBC_predict, pH_predict)  # Stack LBC and pH for RF results
-LBC_pH_kriged_stack <- c(LBC_kriged_raster, pH_kriged_raster)  # Stack for kriging results
+LBC_pH_stack <- c(LBC.1_predict_strata, pH.2_predict)  # Stack LBC and pH for RF results
+LBC_pH_kriged_stack <- c(LBC_krig_SP, pH_krig_SP)  # Stack for kriging results
 
 lime_rf <- app(LBC_pH_stack, fun = function(x) classify_lime(x[2], x[1]))  # x[2] = pH, x[1] = LBC
 lime_kriged <- app(LBC_pH_kriged_stack, fun = function(x) classify_lime(x[2], x[1]))
@@ -1085,15 +1031,17 @@ lime_kriged <- app(LBC_pH_kriged_stack, fun = function(x) classify_lime(x[2], x[
 names(lime_rf) <- "Lime_Requirement_RF"
 names(lime_kriged) <- "Lime_Requirement_Kriged"
 
+lime_rf_clip_strata <- terra::mask(lime_rf, border)
+lime_krig_clip_strata <- terra::mask(lime_kriged, border)
 
 
 # Plot results
-plot(lime_rf, main = "Lime Requirement (RF)")
-plot(lime_kriged, main = "Lime Requirement (Kriged)")
+plot(lime_rf_clip_strata, main = "Lime Requirement (RF)")
+plot(lime_krig_clip_strata, main = "Lime Requirement (Kriged)")
 
 # Save outputs
-#writeRaster(lime_rf, "../Mapping/Output/Lime_Requirement_RF.tif", overwrite = TRUE)
-#writeRaster(lime_kriged, "../Mapping/Output/Lime_Requirement_Kriged.tif", overwrite = TRUE)
+writeRaster(lime_rf, "../Local Data- DO NOT PUSH/output/Lime_Requirement_RF.tif", overwrite = TRUE)
+writeRaster(lime_kriged, "../Local Data- DO NOT PUSH/output/Lime_Requirement_kriging.tif", overwrite = TRUE)
 ```
 
 

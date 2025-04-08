@@ -1195,6 +1195,8 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 #Condense
 ```{r Flatten Stacks}
 #flatten all soil nutrients together into ONE map per method (RF and kriging)
+library(ENMTools)
+PCA_RF <- raster.pca(rf_stack)
 ```
 
 ```{r P clustering}

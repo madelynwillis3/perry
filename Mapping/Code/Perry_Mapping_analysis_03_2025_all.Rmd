@@ -37,6 +37,7 @@ library(corrplot)
 library(tidymodels)
 library(glmnet)
 library(vip)
+library(tidyterra)
 ```
 
 ##Pulling Data & Imagery
@@ -281,7 +282,7 @@ LBC.1_predict_strata <- terra::predict(covariates, LBC.1_rf_strata, na.rm=TRUE)
 
 plot(LBC.1_predict_strata, main = "LBC RF Stratified")
 
-terra::writeRaster(LBC.1_predict_strata, "../Local Data- DO NOT PUSH/LBC.1_predict_strata.tif")
+terra::writeRaster(LBC.1_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/LBC.1_predict_strata.tif", overwrite = TRUE)
 
 #pH
 
@@ -306,7 +307,7 @@ pH.2_predict <- terra::predict(covariates, pH.2_rf, na.rm=TRUE)
 
 plot(pH.2_predict, main = "pH RF")
 
-terra::writeRaster(pH.2_predict, "../Local Data- DO NOT PUSH/pH.2_predict.tif")
+terra::writeRaster(pH.2_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/pH.2_predict.tif", overwrite = TRUE)
 
 # # #pH stratified:
 # pH.2_df_strata <-  pH.2_train %>%
@@ -344,7 +345,7 @@ Ca_predict <- terra::predict(covariates, Ca_rf, na.rm=TRUE)
 
 plot(Ca_predict, main = "Ca RF")
 
-terra::writeRaster(Ca_predict, "../Local Data- DO NOT PUSH/Ca_predict.tif")
+terra::writeRaster(Ca_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/Ca_predict.tif", overwrite = TRUE)
 
 # #Ca stratified:
 # Ca_df_strata <-  Ca_train %>%
@@ -381,7 +382,7 @@ K_predict <- terra::predict(covariates, K_rf, na.rm=TRUE)
 
 plot(K_predict, main = "K RF")
 
-terra::writeRaster(K_predict, "../Local Data- DO NOT PUSH/K_predict.tif")
+terra::writeRaster(K_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/K_predict.tif", overwrite = TRUE)
 
 
 # #K stratified:
@@ -419,6 +420,9 @@ Mg_predict <- terra::predict(covariates, Mg_rf, na.rm=TRUE)
 
 plot(Mg_predict, main = "Mg RF")
 
+terra::writeRaster(Mg_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/Mg_predict.tif", overwrite = TRUE)
+
+
 #Mg stratified:
 
 # Mg_df_strata <-  Mn_train %>%
@@ -454,6 +458,9 @@ predictors(Mn_rf)
 Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
 
 plot(Mn_predict, main = "Mn RF")
+
+terra::writeRaster(Mn_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/Mn_predict.tif", overwrite = TRUE)
+
 
 # #Mn stratified:
 # Mn_df_strata <-  Mn_train %>%
@@ -505,6 +512,8 @@ predictors(P_rf_strata)
 P_predict_strata <- terra::predict(covariates, P_rf_strata, na.rm=TRUE)
 
 plot(P_predict_strata, main = "P RF Stratified")
+
+terra::writeRaster(P_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/P_predict.tif", overwrite = TRUE)
 
 
   # #p CID adjusted with points
@@ -563,6 +572,7 @@ Zn_predict_strata <- terra::predict(covariates, Zn_rf_strata, na.rm=TRUE)
 
 plot(Zn_predict_strata, main = "Zn RF Stratified")
 
+terra::writeRaster(Zn_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/Zn_predict.tif", overwrite = TRUE)
 
 
 
@@ -734,20 +744,36 @@ nut_kriged_raster_C <- rasterize(nut_kriged_C, covariates, field="var1.pred")}
 
 #LBC:
 LBC_krig_C <- Krig(LBC.1~1,soil_points_sp_CID,"Sph") #ehh. Not really a fit. Nugget-esque.
+writeRaster(LBC_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/LBC_krig_C.tif", overwrite = TRUE)
 #P:
 P_krig_C <- Krig(P~1,soil_points_sp_CID,"Lin")
+writeRaster(P_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/P_krig_C.tif", overwrite = TRUE)
+
 #pH:
 pH_krig_C <- Krig(pH.2~1,soil_points_sp_CID,"Exp")
+writeRaster(pH_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/pH_krig_C.tif", overwrite = TRUE)
+
 #Ca:
 Ca_krig_C <- Krig(Ca~1,soil_points_sp_CID,"Sph")
+writeRaster(Ca_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/Ca_krig_C.tif", overwrite = TRUE)
+
 #K:
 K_krig_C <- Krig(K~1,soil_points_sp_CID,"Sph")
+writeRaster(K_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/K_krig_C.tif", overwrite = TRUE)
+
 #Mg:
-Mg_krig_C <- Krig(Mg~1,soil_points_sp_CID,"Sph") #was nugget, now sph
+Mg_krig_C <- Krig(Mg~1,soil_points_sp_CID,"Sph")
+writeRaster(Mg_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/Mg_krig_C.tif", overwrite = TRUE)
+#was nugget, now sph
+
 #Mn:
 Mn_krig_C <- Krig(Mn~1,soil_points_sp_CID,"Nug")
+writeRaster(Mn_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/Mn_krig_C.tif", overwrite = TRUE)
+
 #Zn
 Zn_krig_C <- Krig(Zn~1,soil_points_sp_CID,"Nug")
+writeRaster(Zn_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/Zn_krig_C.tif", overwrite = TRUE)
+
 
 #plotting:
 LBC_plot_krig_C <- plot(LBC_krig_C, main = "LBC Kriging Composite") #no fit
@@ -782,20 +808,36 @@ VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
 
 #LBC:
 LBC_krig_SP <- Krig(LBC.1~1,soil_points_sp_SPID,"Nug")
+writeRaster(LBC_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/LBC_krig_SP.tif", overwrite = TRUE)
+
 #P:
 P_krig_SP <- Krig(P~1,soil_points_sp_SPID,"Sph")
+writeRaster(P_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/P_krig_SP.tif", overwrite = TRUE)
+
 #pH:
 pH_krig_SP <- Krig(pH.2~1,soil_points_sp_SPID,"Exp")
+writeRaster(pH_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/pH_krig_SP.tif", overwrite = TRUE)
+
 #Ca:
 Ca_krig_SP <- Krig(Ca~1,soil_points_sp_SPID,"Sph")
+writeRaster(Ca_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/Ca_krig_SP.tif", overwrite = TRUE)
+
 #K:
 K_krig_SP <- Krig(K~1,soil_points_sp_SPID,"Sph")
+writeRaster(K_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/K_krig_SP.tif", overwrite = TRUE)
+
 #Mg:
 Mg_krig_SP <- Krig(Mg~1,soil_points_sp_SPID,"Sph") #was nugget, now sph
+writeRaster(Mg_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/Mg_krig_SP.tif", overwrite = TRUE)
+
 #Mn:
 Mn_krig_SP <- Krig(Mn~1,soil_points_sp_SPID,"Exp")
+writeRaster(Mn_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/Mn_krig_SP.tif", overwrite = TRUE)
+
 #Zn
 Zn_krig_SP <- Krig(Zn~1,soil_points_sp_SPID,"Nug")
+writeRaster(Zn_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/Zn_krig_SP.tif", overwrite = TRUE)
+
 
 #plotting:
 LBC_plot_krig_SP <- plot(LBC_krig_SP, main = "LBC Kriging Single Point") #no fit
@@ -866,21 +908,34 @@ VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 ##stack
 ```{r stack}
+nutrient_names <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
 #stack every soil variable map together for RF and kriging methods:
 
 #RF:
 
-rf_stack <- rast(c(LBC.1_predict_strata, pH.2_predict, Ca_predict, K_predict, Mg_predict, Mn_predict_strata, P_predict_strata, Zn_predict_strata))
-names(rf_stack) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+rf_stack <- list.files("../Local Data- DO NOT PUSH/rf nutrient rasters", full.names = TRUE)%>%
+  rast()
+names(rf_stack) <- nutrient_names
+rf_stack <- terra::mask(rf_stack, border)
+plot(rf_stack)
+
 
 #Kriging:
 
 #composite:
-krig_stack_C <- rast(c(LBC_krig_C, pH_krig_C, Ca_krig_C, K_krig_C, Mg_krig_C, Mn_krig_C, P_krig_C, Zn_krig_C))
-names(krig_stack_C) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+krig_stack_C <-list.files("../Local Data- DO NOT PUSH/krig rasters/composite", full.names = TRUE)%>%
+  rast()
+names(krig_stack_C) <- nutrient_names
+krig_stack_C <- terra::mask(krig_stack_C, border)
+plot(krig_stack_C)
+
 #single point:
-krig_stack_SP <- rast(c(LBC_krig_SP, pH_krig_SP, Ca_krig_SP, K_krig_SP, Mg_krig_SP, Mn_krig_SP, P_krig_SP, Zn_krig_SP))
-names(krig_stack_SP) <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+krig_stack_SP <-list.files("../Local Data- DO NOT PUSH/krig rasters/single point", full.names = TRUE)%>%
+  rast()
+names(krig_stack_SP) <- nutrient_names
+krig_stack_SP <- terra::mask(krig_stack_SP, border)
+plot(krig_stack_SP)
+
 ```
 
 
@@ -1073,11 +1128,11 @@ classify_wrapper <- function(Mg, pH) {
 }
 
 # RF:
-Mg_rf_numeric <- terra::app(c(Mg_predict, pH_predict), 
+Mg_rf_numeric <- terra::app(c(Mg_predict, pH.2_predict), 
                              function(x) classify_wrapper(x[1], x[2]))
 
 # Kriging:
-Mg_kriged_numeric <- terra::app(c(Mg_kriged_raster, pH_kriged_raster), 
+Mg_kriged_numeric <- terra::app(c(Mg_kriged_raster, pH_krig_C), 
                                  function(x) classify_wrapper(x[1], x[2]))
 
 # Create a lookup table
@@ -1133,7 +1188,7 @@ classify_wrapper <- function(vals) {
 }
 
 # Apply classification to raster stacks
-Mn_rf_numeric <- terra::app(c(Mn_predict, pH_predict), classify_wrapper, cores=4)
+Mn_rf_numeric <- terra::app(c(Mn_predict, pH.2_predict), classify_wrapper, cores=4)
 Mn_kriged_numeric <- app(c(Mn_kriged_raster, pH_kriged_raster), classify_wrapper, cores=4)
 
 # Create a lookup table for categories
@@ -1195,9 +1250,91 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 #Condense
 ```{r Flatten Stacks}
 #flatten all soil nutrients together into ONE map per method (RF and kriging)
-library(ENMTools)
-PCA_RF <- raster.pca(rf_stack)
+
+#need to normalize raster stack first:
+
+rf_stack<-scale(rf_stack)
+
+#PCA RF:
+rf_PCA <- spca(rf_stack,
+  layers_format = ".tif")
+
+#PCA Krig C:
+krig_PCA_C_subset <-  subset(krig_stack_C, c("Mg", "Zn"),  TRUE) #remove nugget rasters
+
+krig_PCA_C <- spca(krig_PCA_C_subset,
+  layers_format = ".tif")
+
+#PCA Krig SP:
+krig_PCA_SP_subset <-  subset(krig_stack_SP, c("Ca", "Zn"),  TRUE) #remove nugget rasters
+
+krig_PCA_SP <- spca(krig_PCA_SP_subset,
+  layers_format = ".tif")
+
 ```
+```{r PCA method (cluster, reclassify)}
+
+#RF: PCA 1:5?
+
+test_3 <- rf_PCA$pc_layers %>%
+  rast() %>%
+  select(PC1,PC2,PC3,PC4,PC5) %>%
+  k_means(centers = 5)
+
+test_3_zones<-zonal(rf_stack, test_3$lyr1, 'mean')
+
+test_3_poly <- as.polygons(test_3)
+
+test_3_sum <- extract(rf_stack,test_3_poly)
+
+plot(test_3_poly)
+
+stats::kmeans(test_3, 5, nstart = 25)
+
+
+    # library(FRESA.CAD)
+    # cluster_rf_PCA <- clusterISODATA(rf_PCA$pc_layers,
+    #                  clusteringMethod=GMVECluster,
+    #                  trainFraction=0.99,
+    #                  randomTests=10,
+    #                  jaccardThreshold=0.45,
+    #                  isoDataThreshold=0.75,
+    #                  plot=TRUE)
+
+
+
+#Krig: PCA 1:4?
+  #composite
+
+
+
+  #single point
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ```{r P clustering}
 

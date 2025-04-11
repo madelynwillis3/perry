@@ -1289,17 +1289,13 @@ test_3_sum <- extract(rf_stack,test_3_poly)
 
 plot(test_3_poly)
 
+test_3_agg <- terra::aggregate(test_3_poly, by = )
+
+plot(test_3_agg)
+
 stats::kmeans(test_3, 5, nstart = 25)
 
 
-    # library(FRESA.CAD)
-    # cluster_rf_PCA <- clusterISODATA(rf_PCA$pc_layers,
-    #                  clusteringMethod=GMVECluster,
-    #                  trainFraction=0.99,
-    #                  randomTests=10,
-    #                  jaccardThreshold=0.45,
-    #                  isoDataThreshold=0.75,
-    #                  plot=TRUE)
 
 
 

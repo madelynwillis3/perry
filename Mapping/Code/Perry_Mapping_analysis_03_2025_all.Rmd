@@ -11,10 +11,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 
     #libraries
-#library(reticulate)
-#library(rgee)
-#ee_Authenticate()
-#ee_Initialize()
 library(sf)
 library(tidyverse)
 library(raster)
@@ -45,12 +41,12 @@ library(tidyterra)
 
 ```{r ALL data pull, message = FALSE}
 #Grabbing Sample ID's
-soil_points <- st_read("../Local Data- DO NOT PUSH/Perry_all points_17N/all_samples_points_perry_2.shp") %>%
+soil_points <- st_read("../Local Data- DO NOT PUSH/surface_points_perry_corrected.shp") %>%
   pivot_longer(cols = c("CID","SPID"), names_to ="type", values_to = "ID")
   
 
 #CSV of AESL data:
-soil_all <- read.csv("../Local Data- DO NOT PUSH/Perry_all_samples_all.csv")
+soil_all <- read.csv("../Local Data- DO NOT PUSH/Perry_all_samples_all(in).csv")
 
 # Merge points + sample data:
 soil_points <- merge(soil_points, soil_all, by = "ID") #CID and SPID
@@ -282,200 +278,202 @@ LBC.1_predict_strata <- terra::predict(covariates, LBC.1_rf_strata, na.rm=TRUE)
 
 plot(LBC.1_predict_strata, main = "LBC RF Stratified")
 
-terra::writeRaster(LBC.1_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/LBC.1_predict_strata.tif", overwrite = TRUE)
+terra::writeRaster(LBC.1_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/LBC_rf.tif", overwrite = TRUE)
 
-#pH
-
-pH.2_df <- soils_df_wrang_SP %>%
-  dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
-
-pH.2_index_train <- caret::createDataPartition(pH.2_df$pH.2, p = .8, list = F)
-
-pH.2_df_train <- pH.2_df[pH.2_index_train,]
-pH.2_df_test <- pH.2_df[-pH.2_index_train,]
-
-
-
-pH.2_rf <- train(pH.2 ~ ., data = pH.2_df_train, method = "rf", trControl = trainControl)
-
-print(pH.2_rf)
-
-predictors(pH.2_rf)
-
-
-pH.2_predict <- terra::predict(covariates, pH.2_rf, na.rm=TRUE)
-
-plot(pH.2_predict, main = "pH RF")
-
-terra::writeRaster(pH.2_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/pH.2_predict.tif", overwrite = TRUE)
-
-# # #pH stratified:
-# pH.2_df_strata <-  pH.2_train %>%
+# #pH
+# 
+# pH.2_df <- soils_df_wrang_SP %>%
 #   dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 # 
-# pH.2_rf_strata <- train(pH.2 ~ ., data = pH.2_df_strata, method = "rf", trControl = trainControl)
+# pH.2_index_train <- caret::createDataPartition(pH.2_df$pH.2, p = .8, list = F)
 # 
-# print(pH.2_rf_strata)
+# pH.2_df_train <- pH.2_df[pH.2_index_train,]
+# pH.2_df_test <- pH.2_df[-pH.2_index_train,]
 # 
-# predictors(pH.2_rf_strata)
 # 
-# pH.2_predict_strata <- terra::predict(covariates, pH.2_rf_strata, na.rm=TRUE)
 # 
-# plot(pH.2_predict_strata, main = "pH RF Stratified")
+# pH.2_rf <- train(pH.2 ~ ., data = pH.2_df_train, method = "rf", trControl = trainControl)
+# 
+# print(pH.2_rf)
+# 
+# predictors(pH.2_rf)
+# 
+# 
+# pH.2_predict <- terra::predict(covariates, pH.2_rf, na.rm=TRUE)
+# 
+# plot(pH.2_predict, main = "pH RF")
+# 
+# terra::writeRaster(pH.2_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/pH.2_predict.tif", overwrite = TRUE)
+
+# # #pH stratified:
+pH.2_df_strata <-  pH.2_train %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+pH.2_rf_strata <- train(pH.2 ~ ., data = pH.2_df_strata, method = "rf", trControl = trainControl)
+
+print(pH.2_rf_strata)
+
+predictors(pH.2_rf_strata)
+
+pH.2_predict_strata <- terra::predict(covariates, pH.2_rf_strata, na.rm=TRUE)
+
+plot(pH.2_predict_strata, main = "pH RF Stratified")
+terra::writeRaster(pH.2_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/pH_rf.tif", overwrite = TRUE)
 
 
 #Ca:
-Ca_df <- soils_df_wrang_SP %>%
-  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
-
-Ca_index_train <- caret::createDataPartition(Ca_df$Ca, p = .8, list = F)
-
-Ca_df_train <- Ca_df[Ca_index_train,]
-Ca_df_test <- Ca_df[-Ca_index_train,]
-
-
-Ca_rf <- train(Ca ~ ., data = Ca_df_train, method = "rf", trControl = trainControl)
-
-print(Ca_rf)
-
-predictors(Ca_rf)
-
-
-Ca_predict <- terra::predict(covariates, Ca_rf, na.rm=TRUE)
-
-plot(Ca_predict, main = "Ca RF")
-
-terra::writeRaster(Ca_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/Ca_predict.tif", overwrite = TRUE)
-
-# #Ca stratified:
-# Ca_df_strata <-  Ca_train %>%
+# Ca_df <- soils_df_wrang_SP %>%
 #   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
 # 
-# Ca_rf_strata <- train(Ca ~ ., data = Ca_df_strata, method = "rf", trControl = trainControl)
+# Ca_index_train <- caret::createDataPartition(Ca_df$Ca, p = .8, list = F)
 # 
-# print(Ca_rf_strata)
+# Ca_df_train <- Ca_df[Ca_index_train,]
+# Ca_df_test <- Ca_df[-Ca_index_train,]
 # 
-# predictors(Ca_rf_strata)
 # 
-# Ca_predict_strata <- terra::predict(covariates, Ca_rf_strata, na.rm=TRUE)
+# Ca_rf <- train(Ca ~ ., data = Ca_df_train, method = "rf", trControl = trainControl)
 # 
-# plot(Ca_predict_strata, main = "Ca RF Stratified")
+# print(Ca_rf)
+# 
+# predictors(Ca_rf)
+# 
+# 
+# Ca_predict <- terra::predict(covariates, Ca_rf, na.rm=TRUE)
+# 
+# plot(Ca_predict, main = "Ca RF")
+
+
+# #Ca stratified:
+Ca_df_strata <-  Ca_train %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'K', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+Ca_rf_strata <- train(Ca ~ ., data = Ca_df_strata, method = "rf", trControl = trainControl)
+
+print(Ca_rf_strata)
+
+predictors(Ca_rf_strata)
+
+Ca_predict_strata <- terra::predict(covariates, Ca_rf_strata, na.rm=TRUE)
+
+plot(Ca_predict_strata, main = "Ca RF Stratified")
+terra::writeRaster(Ca_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/Ca_rf.tif", overwrite = TRUE)
+
+
 
 #K:
 
-K_df <- soils_df_wrang_SP %>%
-  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+# K_df <- soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+# 
+# K_index_train <- caret::createDataPartition(K_df$K, p = .8, list = F)
+# 
+# K_df_train <- K_df[K_index_train,]
+# K_df_test <- K_df[-K_index_train,]
+# 
+# 
+# K_rf <- train(K ~ ., data = K_df_train, method = "rf", trControl = trainControl)
+# 
+# print(K_rf)
+# 
+# predictors(K_rf)
+# 
+# K_predict <- terra::predict(covariates, K_rf, na.rm=TRUE)
+# 
+# plot(K_predict, main = "K RF")
 
-K_index_train <- caret::createDataPartition(K_df$K, p = .8, list = F)
-
-K_df_train <- K_df[K_index_train,]
-K_df_test <- K_df[-K_index_train,]
-
-
-K_rf <- train(K ~ ., data = K_df_train, method = "rf", trControl = trainControl)
-
-print(K_rf)
-
-predictors(K_rf)
-
-K_predict <- terra::predict(covariates, K_rf, na.rm=TRUE)
-
-plot(K_predict, main = "K RF")
-
-terra::writeRaster(K_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/K_predict.tif", overwrite = TRUE)
 
 
 # #K stratified:
-# K_df_strata <-  K_train %>%
-#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
-# 
-# K_rf_strata <- train(K ~ ., data = K_df_strata, method = "rf", trControl = trainControl)
-# 
-# print(K_rf_strata)
-# 
-# predictors(K_rf_strata)
-# 
-# K_predict_strata <- terra::predict(covariates, K_rf_strata, na.rm=TRUE)
-# 
-# plot(K_predict_strata, main = "K RF Stratified")
+K_df_strata <-  K_train %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'Mg', 'Mn', 'P', 'Zn','x','y'))
+
+K_rf_strata <- train(K ~ ., data = K_df_strata, method = "rf", trControl = trainControl)
+
+print(K_rf_strata)
+
+predictors(K_rf_strata)
+
+K_predict_strata <- terra::predict(covariates, K_rf_strata, na.rm=TRUE)
+
+plot(K_predict_strata, main = "K RF Stratified")
+terra::writeRaster(K_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/K_rf.tif", overwrite = TRUE)
+
 
 #Mg:
 
-Mg_df <- soils_df_wrang_SP %>%
-  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
+# Mg_df <- soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
+# 
+# Mg_index_train <- caret::createDataPartition(Mg_df$Mg, p = .8, list = F)
+# 
+# Mg_df_train <- Mg_df[Mg_index_train,]
+# Mg_df_test <- Mg_df[-Mg_index_train,]
+# 
+# 
+# Mg_rf <- train(Mg ~ ., data = Mg_df_train, method = "rf", trControl = trainControl)
+# 
+# print(Mg_rf)
+# 
+# predictors(Mg_rf)
+# 
+# Mg_predict <- terra::predict(covariates, Mg_rf, na.rm=TRUE)
+# 
+# plot(Mg_predict, main = "Mg RF")
 
-Mg_index_train <- caret::createDataPartition(Mg_df$Mg, p = .8, list = F)
-
-Mg_df_train <- Mg_df[Mg_index_train,]
-Mg_df_test <- Mg_df[-Mg_index_train,]
-
-
-Mg_rf <- train(Mg ~ ., data = Mg_df_train, method = "rf", trControl = trainControl)
-
-print(Mg_rf)
-
-predictors(Mg_rf)
-
-Mg_predict <- terra::predict(covariates, Mg_rf, na.rm=TRUE)
-
-plot(Mg_predict, main = "Mg RF")
-
-terra::writeRaster(Mg_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/Mg_predict.tif", overwrite = TRUE)
 
 
 #Mg stratified:
 
-# Mg_df_strata <-  Mn_train %>%
-#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
-# 
-# Mg_rf_strata <- train(Mg ~ ., data = Mg_df_strata, method = "rf", trControl = trainControl)
-# 
-# print(Mg_rf_strata)
-# 
-# predictors(Mg_rf_strata)
-# 
-# Mg_predict_strata <- terra::predict(covariates, Mg_rf_strata, na.rm=TRUE)
-# 
-# plot(Mg_predict_strata, main = "Mg RF Stratified")
+Mg_df_strata <-  Mn_train %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mn', 'P', 'Zn','x','y'))
+
+Mg_rf_strata <- train(Mg ~ ., data = Mg_df_strata, method = "rf", trControl = trainControl)
+
+print(Mg_rf_strata)
+
+predictors(Mg_rf_strata)
+
+Mg_predict_strata <- terra::predict(covariates, Mg_rf_strata, na.rm=TRUE)
+
+plot(Mg_predict_strata, main = "Mg RF Stratified")
+terra::writeRaster(Mg_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/Mg_rf.tif", overwrite = TRUE)
 
 # #Mn:
 
-Mn_df <- soils_df_wrang_SP %>%
-  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
-
-Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
-
-Mn_df_train <- Mn_df[Mn_index_train,]
-Mn_df_test <- Mn_df[-Mn_index_train,]
-
-
-Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
-
-print(Mn_rf)
-
-predictors(Mn_rf)
-
-Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
-
-plot(Mn_predict, main = "Mn RF")
-
-terra::writeRaster(Mn_predict, "../Local Data- DO NOT PUSH/rf nutrient rasters/Mn_predict.tif", overwrite = TRUE)
+# Mn_df <- soils_df_wrang_SP %>%
+#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
+# 
+# Mn_index_train <- caret::createDataPartition(Mn_df$Mn, p = .8, list = F)
+# 
+# Mn_df_train <- Mn_df[Mn_index_train,]
+# Mn_df_test <- Mn_df[-Mn_index_train,]
+# 
+# 
+# Mn_rf <- train(Mn ~ ., data = Mn_df_train, method = "rf", trControl = trainControl)
+# 
+# print(Mn_rf)
+# 
+# predictors(Mn_rf)
+# 
+# Mn_predict <- terra::predict(covariates, Mn_rf, na.rm=TRUE)
+# 
+# plot(Mn_predict, main = "Mn RF")
 
 
 # #Mn stratified:
-# Mn_df_strata <-  Mn_train %>%
-#   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
-# 
-# Mn_rf_strata <- train(Mn ~ ., data = Mn_df_strata, method = "rf", trControl = trainControl)
-# 
-# print(Mn_rf_strata)
-# 
-# predictors(Mn_rf_strata)
-# 
-# Mn_predict_strata <- terra::predict(covariates, Mn_rf_strata, na.rm=TRUE)
-# 
-# plot(Mn_predict_strata, main = "Mn RF Stratified")
+Mn_df_strata <-  Mn_train %>%
+  dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'P', 'Zn','x','y'))
 
+Mn_rf_strata <- train(Mn ~ ., data = Mn_df_strata, method = "rf", trControl = trainControl)
+
+print(Mn_rf_strata)
+
+predictors(Mn_rf_strata)
+
+Mn_predict_strata <- terra::predict(covariates, Mn_rf_strata, na.rm=TRUE)
+
+plot(Mn_predict_strata, main = "Mn RF Stratified")
+terra::writeRaster(Mn_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/Mn_rf.tif", overwrite = TRUE)
 
 # #P:
 # 
@@ -513,7 +511,7 @@ P_predict_strata <- terra::predict(covariates, P_rf_strata, na.rm=TRUE)
 
 plot(P_predict_strata, main = "P RF Stratified")
 
-terra::writeRaster(P_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/P_predict.tif", overwrite = TRUE)
+terra::writeRaster(P_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/P_rf.tif", overwrite = TRUE)
 
 
   # #p CID adjusted with points
@@ -529,12 +527,12 @@ terra::writeRaster(P_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient ras
   
     #p SPID adjusted with points
   P_predict_adjusted_SP <- P_predict_strata
-  
+
   soil_points_sf_SPID <- st_as_sf(soil_points_SPID, coords = c("x", "y"), crs = st_crs(covariates))
-  
+
   coords <- st_coordinates(soil_points_sf_SPID)
   P_predict_adjusted_SP[terra::cellFromXY(P_predict_strata, coords)] <- soil_points_sf_SPID$P
-  
+
   plot(P_predict_adjusted_SP)
 
 #Zn:
@@ -572,7 +570,7 @@ Zn_predict_strata <- terra::predict(covariates, Zn_rf_strata, na.rm=TRUE)
 
 plot(Zn_predict_strata, main = "Zn RF Stratified")
 
-terra::writeRaster(Zn_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/Zn_predict.tif", overwrite = TRUE)
+terra::writeRaster(Zn_predict_strata, "../Local Data- DO NOT PUSH/rf nutrient rasters/Zn_rf.tif", overwrite = TRUE)
 
 
 
@@ -687,6 +685,39 @@ all_results <- lapply(nutrients, function(nutrient) {
 ```
 
 
+```{r RF validation}
+# Define a function to validate the testing set
+validate_testing_set <- function(model, test_data, nutrient) {
+  # Make predictions on the testing set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Compute evaluation metrics
+  mae <- mean(abs(predictions - test_data[[nutrient]]), na.rm = TRUE)  # Mean Absolute Error
+  rmse <- sqrt(mean((predictions - test_data[[nutrient]])^2, na.rm = TRUE))  # RMSE
+  r_squared <- cor(predictions, test_data[[nutrient]], use = "complete.obs")^2  # R²
+  
+  # Return a list of metrics
+  return(list(MAE = mae, RMSE = rmse, R2 = r_squared))
+}
+
+# Loop through all nutrients
+nutrient_names <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+results <- list()
+
+for (nutrient in nutrient_names) {
+  # Get the model and test set for the current nutrient
+  model <- get(paste0(nutrient, "_rf_strata"))  # Model (e.g., LBC.1_rf_strata)
+  test_set <- get(paste0(nutrient, "_test"))    # Testing data (e.g., LBC.1_test)
+  
+  # Validate the model on the test set
+  results[[nutrient]] <- validate_testing_set(model, test_set, nutrient)
+}
+
+# Print results for all nutrients
+print(results)
+```
+
+
 #Kriging:
 ```{r krig setup}
 
@@ -727,18 +758,20 @@ nut_kriged_raster_C <- rasterize(nut_kriged_C, covariates, field="var1.pred")}
 
 ```
 
+
+
 ##Kriging Composite
 ```{r Kriging CID}
 
 # #all variograms:
-# VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
-# VarioC(P~1,soil_points_sp_CID,"Lin")
-# VarioC(pH.2~1,soil_points_sp_CID,"Exp")
-# VarioC(Ca~1,soil_points_sp_CID,"Sph")
-# VarioC(K~1,soil_points_sp_CID,"Sph")
-# VarioC(Mg~1,soil_points_sp_CID,"Sph")
-# VarioC(Mn~1,soil_points_sp_CID,"Nug")
-# VarioC(Zn~1,soil_points_sp_CID,"Nug")
+VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
+VarioC(P~1,soil_points_sp_CID,"Lin")
+VarioC(pH.2~1,soil_points_sp_CID,"Exp")
+VarioC(Ca~1,soil_points_sp_CID,"Exp")
+VarioC(K~1,soil_points_sp_CID,"Lin")
+VarioC(Mg~1,soil_points_sp_CID,"Sph")
+VarioC(Mn~1,soil_points_sp_CID,"Nug")
+VarioC(Zn~1,soil_points_sp_CID,"Nug")
 
 #kriging: 
 
@@ -754,11 +787,11 @@ pH_krig_C <- Krig(pH.2~1,soil_points_sp_CID,"Exp")
 writeRaster(pH_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/pH_krig_C.tif", overwrite = TRUE)
 
 #Ca:
-Ca_krig_C <- Krig(Ca~1,soil_points_sp_CID,"Sph")
+Ca_krig_C <- Krig(Ca~1,soil_points_sp_CID,"Exp")
 writeRaster(Ca_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/Ca_krig_C.tif", overwrite = TRUE)
 
 #K:
-K_krig_C <- Krig(K~1,soil_points_sp_CID,"Sph")
+K_krig_C <- Krig(K~1,soil_points_sp_CID,"Lin")
 writeRaster(K_krig_C, "..//Local Data- DO NOT PUSH/krig rasters/composite/K_krig_C.tif", overwrite = TRUE)
 
 #Mg:
@@ -795,12 +828,18 @@ Zn_plot_krig_C <- plot(Zn_krig_C, main = "Zn Kriging Composite") #no fit
 soil_points_sf_SPID <- st_as_sf(soil_points_SPID) 
 soil_points_sp_SPID <- as_Spatial(soil_points_sf_SPID)
 
+set.seed(123)  # For reproducibility
+train_indices <- sample(1:nrow(soil_points_SPID), size = 0.8 * nrow(soil_points_SPID))  # 70% training
+soil_points_train <- soil_points_sp_SPID[train_indices, ]  # Training data
+soil_points_test <- soil_points_sp_SPID[-train_indices, ]  # Testing data
+
+
 # #all variograms:
 VarioSP(LBC.1~1,soil_points_sp_SPID,"Nug")
 VarioSP(P~1,soil_points_sp_SPID,"Sph")
 VarioSP(pH.2~1,soil_points_sp_SPID,"Exp")
 VarioSP(Ca~1,soil_points_sp_SPID,"Sph")
-VarioSP(K~1,soil_points_sp_SPID,"Sph")
+VarioSP(K~1,soil_points_sp_SPID,"Exp")
 VarioSP(Mg~1,soil_points_sp_SPID,"Sph")
 VarioSP(Mn~1,soil_points_sp_SPID,"Exp")
 VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
@@ -811,7 +850,7 @@ LBC_krig_SP <- Krig(LBC.1~1,soil_points_sp_SPID,"Nug")
 writeRaster(LBC_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/LBC_krig_SP.tif", overwrite = TRUE)
 
 #P:
-P_krig_SP <- Krig(P~1,soil_points_sp_SPID,"Sph")
+P_krig_SP <- Krig(P~1,soil_points_train,"Sph")
 writeRaster(P_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/P_krig_SP.tif", overwrite = TRUE)
 
 #pH:
@@ -823,7 +862,7 @@ Ca_krig_SP <- Krig(Ca~1,soil_points_sp_SPID,"Sph")
 writeRaster(Ca_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/Ca_krig_SP.tif", overwrite = TRUE)
 
 #K:
-K_krig_SP <- Krig(K~1,soil_points_sp_SPID,"Sph")
+K_krig_SP <- Krig(K~1,soil_points_sp_SPID,"Exp")
 writeRaster(K_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/K_krig_SP.tif", overwrite = TRUE)
 
 #Mg:
@@ -854,7 +893,6 @@ Zn_plot_krig_SP <- plot(Zn_krig_SP, main = "Zn Kriging Single Point") #no fit
 
 ```
 
-
 ```{r compare krig SP and C}
 
 #plotting all variograms:
@@ -863,7 +901,7 @@ VarioSP(LBC.1~1,soil_points_sp_SPID,"Nug")
 VarioC(LBC.1~1,soil_points_sp_CID,"Sph")
 
 VarioSP(P~1,soil_points_sp_SPID,"Sph")
-VarioC(P~1,soil_points_sp_CID,"Lin")
+VarioC(P~1,soil_points_sp_CID,"Nug")
 
 VarioSP(pH.2~1,soil_points_sp_SPID,"Exp")
 VarioC(pH.2~1,soil_points_sp_CID,"Exp")
@@ -872,13 +910,13 @@ VarioSP(Ca~1,soil_points_sp_SPID,"Sph")
 VarioC(Ca~1,soil_points_sp_CID,"Sph")
 
 VarioSP(K~1,soil_points_sp_SPID,"Sph")
-VarioC(K~1,soil_points_sp_CID,"Sph")
+VarioC(K~1,soil_points_sp_CID,"Nug")
 
 VarioSP(Mg~1,soil_points_sp_SPID,"Sph")
 VarioC(Mg~1,soil_points_sp_CID,"Exp")
 
 VarioSP(Mn~1,soil_points_sp_SPID,"Exp")
-VarioC(Mn~1,soil_points_sp_CID,"Lin")
+VarioC(Mn~1,soil_points_sp_CID,"Sph")
 
 VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
 VarioC(Zn~1,soil_points_sp_CID,"Nug")
@@ -887,20 +925,43 @@ VarioC(Zn~1,soil_points_sp_CID,"Nug")
 ```
 
 
+```{r plot all rasters}
+# Define the function to plot rasters for a single nutrient
+plot_nutrient_rasters <- function(rf_raster, krig_sp_raster, krig_c_raster, nutrient_name) {
+  par(mfrow = c(1, 3))  # Set up a 1x3 grid for side-by-side plots
+  
+  # Plot RF raster
+  plot(rf_raster, main = paste(nutrient_name, "(RF)"))
+  
+  # Plot Kriging Single Point raster
+  plot(krig_sp_raster, main = paste(nutrient_name, "(Kriging SP)"))
+  
+  # Plot Kriging Composite raster
+  plot(krig_c_raster, main = paste(nutrient_name, "(Kriging C)"))
+  
+  # Reset plotting layout
+  par(mfrow = c(1, 1))
+}
 
+# List of nutrient names
+nutrient_names <- c("LBC", "pH", "Ca", "K", "Mg", "Mn", "P", "Zn")
 
+# Base paths for raster files
+rf_path <- "../Local Data- DO NOT PUSH/rf nutrient rasters/"
+krig_sp_path <- "../Local Data- DO NOT PUSH/krig rasters/single point/"
+krig_c_path <- "../Local Data- DO NOT PUSH/krig rasters/composite/"
 
-
-
-
-
-
-
-
-
-
-
-
+# Loop through each nutrient and plot its rasters
+for (nutrient in nutrient_names) {
+  # Construct file paths for the current nutrient
+  rf_raster <- rast(file.path(rf_path, paste0(nutrient, "_rf.tif")))
+  krig_sp_raster <- rast(file.path(krig_sp_path, paste0(nutrient, "_krig_SP.tif")))
+  krig_c_raster <- rast(file.path(krig_c_path, paste0(nutrient, "_krig_C.tif")))
+  
+  # Plot all rasters for the current nutrient
+  plot_nutrient_rasters(rf_raster, krig_sp_raster, krig_c_raster, nutrient_name = nutrient)
+}
+```
 
 
 
@@ -985,7 +1046,7 @@ par(mfrow = c(2,2))
   
   # Classify P rasters #P adjusted is just forcing the soil points in
   
-  #P_predict_classified_adjust <- classify(P_predict_adjusted_SP, P_class_matrix)
+P_predict_classified_adjust <- classify(P_predict_adjusted_SP, P_class_matrix)
 
 
 # Assign category labels  for P:
@@ -1003,6 +1064,90 @@ plot(P_kriged_classified, main = "Classified P (Kriging)")
 
 
 ```
+
+
+```{r Validate P Classification}
+#Test P classification:                            
+reclassify_P <- function(P) {
+  if (is.na(P)) return(NA)  # Handle NA values
+  if (P <= 30) return("Low P (0-30 lbs/A)")  # Low category
+  else if (P <= 60) return("Medium P (31-60 lbs/A)")  # Medium category
+  else if (P <= 100) return("High P (61-100 lbs/A)")  # High category
+  else return("Very High P (>100 lbs/A)")  # Very High category
+}
+extracted_P_class <- terra::extract(P_predict_classified, P_test_sf, cells = TRUE)
+#Classify:
+P_test$reclassified_category <- sapply(P_test$P, reclassify_P)
+
+# Compare with P_classified
+comparison <- data.frame(
+  P_test_ID = 1:nrow(P_test),
+  P_test_category = P_test$reclassified_category,
+  Extracted_category = extracted_P_class$category
+)
+
+# mismatches
+mismatches <- comparison[comparison$P_test_category != comparison$Extracted_category, ]
+cat("Number of mismatched classifications:", nrow(mismatches), "\n")
+
+# confusion matrix
+library(caret)
+confusion <- confusionMatrix(
+  factor(comparison$P_test_category, levels = unique(c(comparison$P_test_category, comparison$Extracted_category))),
+  factor(comparison$Extracted_category, levels = unique(c(comparison$P_test_category, comparison$Extracted_category)))
+)
+
+# print cm
+print("Confusion Matrix:")
+print(confusion)
+
+
+```
+```{r Krig Validation}
+# Load necessary libraries
+library(terra)
+library(caret)
+
+# Load the kriged raster created in the previous chunk
+P_krig_SP <- rast("..//Local Data- DO NOT PUSH/krig rasters/single point/P_krig_SP.tif")
+
+# Extract kriged values at test point locations
+test_coords <- data.frame(x = soil_points_test@coords[, 1], y = soil_points_test@coords[, 2])
+kriged_values <- terra::extract(P_krig_SP, test_coords)
+
+# Add extracted kriged values to the test data
+soil_points_test$kriged_value <- kriged_values[, 2]  # Extracted values from the raster
+
+# Define the reclassification function
+reclassify_P <- function(P) {
+  if (is.na(P)) return(NA)  # Handle NA values
+  if (P <= 30) return("Low P (0-30 lbs/A)")  # Low category
+  else if (P <= 60) return("Medium P (31-60 lbs/A)")  # Medium category
+  else if (P <= 100) return("High P (61-100 lbs/A)")  # High category
+  else return("Very High P (>100 lbs/A)")  # Very High category
+}
+
+# Apply reclassification to both true and kriged values
+soil_points_test$true_category <- sapply(soil_points_test$P, reclassify_P)
+soil_points_test$kriged_category <- sapply(soil_points_test$kriged_value, reclassify_P)
+
+# Generate the confusion matrix
+confusion_kriging <- confusionMatrix(
+  factor(soil_points_test$true_category, levels = c("Low P (0-30 lbs/A)", 
+                                                    "Medium P (31-60 lbs/A)", 
+                                                    "High P (61-100 lbs/A)", 
+                                                    "Very High P (>100 lbs/A)")),
+  factor(soil_points_test$kriged_category, levels = c("Low P (0-30 lbs/A)", 
+                                                      "Medium P (31-60 lbs/A)", 
+                                                      "High P (61-100 lbs/A)", 
+                                                      "Very High P (>100 lbs/A)"))
+)
+
+# Output the confusion matrix
+print("Confusion Matrix for Kriged Results:")
+print(confusion_kriging)
+```
+
 
 
 ```{r Classify K}
@@ -1076,7 +1221,7 @@ classify_lime <- function(pH, LBC) {
 
 
 # Apply to rasters
-LBC_pH_stack <- c(LBC.1_predict_strata, pH.2_predict)  # Stack LBC and pH for RF results
+LBC_pH_stack <- c(LBC.1_predict_strata, pH.2_predict_strata)  # Stack LBC and pH for RF results
 LBC_pH_kriged_stack <- c(LBC_krig_SP, pH_krig_SP)  # Stack for kriging results
 
 lime_rf <- app(LBC_pH_stack, fun = function(x) classify_lime(x[2], x[1]))  # x[2] = pH, x[1] = LBC
@@ -1097,6 +1242,8 @@ plot(lime_krig_clip_strata, main = "Lime Requirement (Kriged)")
 # Save outputs
 writeRaster(lime_rf, "../Local Data- DO NOT PUSH/output/Lime_Requirement_RF.tif", overwrite = TRUE)
 writeRaster(lime_kriged, "../Local Data- DO NOT PUSH/output/Lime_Requirement_kriging.tif", overwrite = TRUE)
+library(beepr)
+beepr::beep("wilhelm")
 ```
 
 
@@ -1128,11 +1275,11 @@ classify_wrapper <- function(Mg, pH) {
 }
 
 # RF:
-Mg_rf_numeric <- terra::app(c(Mg_predict, pH.2_predict), 
+Mg_rf_numeric <- terra::app(c(Mg_predict_strata, pH.2_predict_strata), 
                              function(x) classify_wrapper(x[1], x[2]))
 
 # Kriging:
-Mg_kriged_numeric <- terra::app(c(Mg_kriged_raster, pH_krig_C), 
+Mg_kriged_numeric <- terra::app(c(Mg_krig_C, pH_krig_C), 
                                  function(x) classify_wrapper(x[1], x[2]))
 
 # Create a lookup table
@@ -1188,8 +1335,8 @@ classify_wrapper <- function(vals) {
 }
 
 # Apply classification to raster stacks
-Mn_rf_numeric <- terra::app(c(Mn_predict, pH.2_predict), classify_wrapper, cores=4)
-Mn_kriged_numeric <- app(c(Mn_kriged_raster, pH_kriged_raster), classify_wrapper, cores=4)
+Mn_rf_numeric <- terra::app(c(Mn_predict_strata, pH.2_predict_strata), classify_wrapper, cores=4)
+Mn_kriged_numeric <- app(c(Mn_krig_C, pH_krig_C), classify_wrapper, cores=4)
 
 # Create a lookup table for categories
 Mn_categories <- data.frame(
@@ -1222,8 +1369,8 @@ Zn_labels <- c(1, 2, 3)  # Assign numeric labels (for low, medium, adequate)
 Zn_class_matrix <- cbind(Zn_classes[-length(Zn_classes)], Zn_classes[-1], Zn_labels)
 
 # Classify Zn rasters
-Zn_predict_classified <- classify(Zn_predict, Zn_class_matrix)
-Zn_kriged_classified <- classify(Zn_kriged_raster, Zn_class_matrix)
+Zn_predict_classified <- classify(Zn_predict_strata, Zn_class_matrix)
+Zn_kriged_classified <- classify(Zn_krig_C, Zn_class_matrix)
 
 # Assign category labels for Zn
 Zn_labels_factor <- c("Low Zn (Apply 3 lbs Zn/acre)", 
@@ -1252,11 +1399,11 @@ plot(Zn_kriged_classified, main = "Zn Classification (Kriged)")
 #flatten all soil nutrients together into ONE map per method (RF and kriging)
 
 #need to normalize raster stack first:
-
-rf_stack<-scale(rf_stack)
+rf_stack_og <- rf_stack
+rf_stack_scale<-scale(rf_stack)
 
 #PCA RF:
-rf_PCA <- spca(rf_stack,
+rf_PCA <- spca(rf_stack_scale,
   layers_format = ".tif")
 
 #PCA Krig C:
@@ -1334,7 +1481,7 @@ stats::kmeans(test_3, 5, nstart = 25)
 
 ```{r P clustering}
 
-
+library(igraph)
 # 1. Aggregate (Optional: Only if you want to reduce resolution)
 # Example: Aggregate by a factor of 2 (adjust as needed)
 P_rf_agg <- terra::aggregate(P_predict_classified_adjust, fact= 15, fun=modal, expand=TRUE)
@@ -1350,8 +1497,53 @@ P_rf_sieved <- terra::sieve(P_rf_agg, threshold=25)
 
 # 5. Plot to check the results
 plot(P_rf_sieved, main="Cleaned RF Map (Aggregated, Clumped, and Sieved)")
+writeRaster(P_rf_sieved, "P_rf_sieved.tif", overwrite=TRUE)
 
 ```
+
+```{r}
+# Load necessary libraries
+library(terra)
+library(caret)
+
+# Step 1: Extract values from the cleaned raster at test locations
+P_test$cleaned_rf_value <- terra::extract(P_rf_sieved, P_test[, c("x", "y")])[, 2]  # Extract raster values
+
+# Step 2: Define the reclassification function (same as before, if needed)
+reclassify_P <- function(P) {
+  if (is.na(P)) return(NA)  # Handle NA values
+  if (P <= 30) return("Low P (0-30 lbs/A)")  # Low category
+  else if (P <= 60) return("Medium P (31-60 lbs/A)")  # Medium category
+  else if (P <= 100) return("High P (61-100 lbs/A)")  # High category
+  else return("Very High P (>100 lbs/A)")  # Very High category
+}
+
+# Step 3: Reclassify the extracted raster values to match the categories
+P_test$cleaned_rf_category <- sapply(P_test$cleaned_rf_value, reclassify_P)
+
+# Step 4: Compare the cleaned raster categories with the true categories
+comparison_cleaned_rf <- data.frame(
+  True_Category = P_test$reclassified_category,  # True categories from P_test
+  Cleaned_RF_Category = P_test$cleaned_rf_category  # Extracted and reclassified raster categories
+)
+
+# Step 5: Generate the confusion matrix
+confusion_cleaned_rf <- confusionMatrix(
+  factor(comparison_cleaned_rf$True_Category, levels = c("Low P (0-30 lbs/A)", 
+                                                         "Medium P (31-60 lbs/A)", 
+                                                         "High P (61-100 lbs/A)", 
+                                                         "Very High P (>100 lbs/A)")),
+  factor(comparison_cleaned_rf$Cleaned_RF_Category, levels = c("Low P (0-30 lbs/A)", 
+                                                               "Medium P (31-60 lbs/A)", 
+                                                               "High P (61-100 lbs/A)", 
+                                                               "Very High P (>100 lbs/A)"))
+)
+
+# Step 6: Output the confusion matrix
+print("Confusion Matrix for Cleaned RF Map:")
+print(confusion_cleaned_rf)
+```
+
 
 #Clean Maps
 ```{r Clean Up Maps}
@@ -1404,6 +1596,9 @@ plot(zone_raster_low_res, main = "Management Zones for pH (Clustered)", col = te
 
 ```
 
+```{r}
+
+```
 
 
 ```{r Clean Up Maps P}
@@ -1470,7 +1665,8 @@ P_rf_sieved <- terra::sieve(P_rf_agg, threshold=25)
 
 # 5. Plot to check the results
 plot(P_rf_sieved, main="Cleaned RF Map (Aggregated, Clumped, and Sieved)")
-
+# Save the cleaned raster
+writeRaster(P_rf_sieved, "../Local Data- DO NOT PUSH/output/P_rf_sieved.tif", overwrite=TRUE)
 ```
 
 
@@ -1571,6 +1767,34 @@ dev.off
 #results
 ```
 
+```{r}
+
+# Load necessary libraries
+library(terra)
+P_rf_sieved <- terra::mask(P_rf_sieved, border)
+# Load necessary libraries
+library(terra)
+
+# Step 1: Define category labels and colors
+P_labels_factor <- c("Low P (0-30 lbs/A)", "Medium P (31-60 lbs/A)", 
+                     "High P (61-100 lbs/A)", "Very High P (100+ lbs/A)")
+colors <- c("#1b9e77", "#d95f02", "#7570b3", "#e7298a")  # Consistent color palette
+
+# Step 2: Assign labels to both rasters
+levels(P_rf_sieved) <- data.frame(ID = 1:4, category = P_labels_factor)
+levels(P_kriged_classified) <- data.frame(ID = 1:4, category = P_labels_factor)
+
+# Step 3: Plot both rasters with consistent colors and legends
+par(mfrow = c(1, 2))  # Set side-by-side layout
+
+# RF Sieved Raster
+plot(P_rf_sieved, main = "Classified P (RF Prediction)", col = colors, breaks = c(0.5, 1.5, 2.5, 3.5, 4.5))
+legend("bottomleft", legend = P_labels_factor, fill = colors, title = "P Recommendation", bty = "n", cex = 0.8)
+
+# Kriging Raster
+plot(P_kriged_classified, main = "Classified P (Kriging)", col = colors, breaks = c(0.5, 1.5, 2.5, 3.5, 4.5))
+legend("bottomleft", legend = P_labels_factor, fill = colors, title = "P Recommendation", bty = "n", cex = 0.8)
+```
 
 
 

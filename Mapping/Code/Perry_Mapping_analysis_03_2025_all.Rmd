@@ -181,7 +181,7 @@ write.csv(PCA_,file="../Local Data- DO NOT PUSH/PCA_covar.csv")
 ```
 
 
-```{r train test + dist graphs}
+```{r split}
 set.seed(626)
 
 list_train <- list()
@@ -829,7 +829,7 @@ soil_points_sf_SPID <- st_as_sf(soil_points_SPID)
 soil_points_sp_SPID <- as_Spatial(soil_points_sf_SPID)
 
 set.seed(123)  # For reproducibility
-train_indices <- sample(1:nrow(soil_points_SPID), size = 0.8 * nrow(soil_points_SPID))  # 70% training
+train_indices <- sample(1:nrow(soil_points_SPID), size = 0.8 * nrow(soil_points_SPID))
 soil_points_train <- soil_points_sp_SPID[train_indices, ]  # Training data
 soil_points_test <- soil_points_sp_SPID[-train_indices, ]  # Testing data
 
@@ -846,7 +846,7 @@ VarioSP(Zn~1,soil_points_sp_SPID,"Nug")
 
 
 #LBC:
-LBC_krig_SP <- Krig(LBC.1~1,soil_points_sp_SPID,"Nug")
+LBC_krig_SP <- Krig(LBC.1~1,LBC.1_df_train,"Nug")
 writeRaster(LBC_krig_SP, "..//Local Data- DO NOT PUSH/krig rasters/single point/LBC_krig_SP.tif", overwrite = TRUE)
 
 #P:
@@ -892,6 +892,11 @@ Zn_plot_krig_SP <- plot(Zn_krig_SP, main = "Zn Kriging Single Point") #no fit
 
 
 ```
+```{r}
+
+```
+
+
 
 ```{r compare krig SP and C}
 

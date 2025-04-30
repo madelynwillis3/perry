@@ -41,7 +41,7 @@ library(tidyterra)
 
 ```{r ALL data pull, message = FALSE}
 #Grabbing Sample ID's
-soil_points <- st_read("../Local Data- DO NOT PUSH/surface_points_perry_corrected.shp") %>%
+soil_points <- st_read("../Local Data- DO NOT PUSH/fixed_soil_points2.shp") %>%
   pivot_longer(cols = c("CID","SPID"), names_to ="type", values_to = "ID")
   
 
@@ -228,9 +228,15 @@ ggplot() +
 ```{r whole P process}
 #stratify P split:
 set.seed(623)
-  set_P_split <- initial_split(soils_df_wrang_SP,prop = 0.8, strata = P)
-  set_P_train <- training(set_P_split)
-  set_P_test <- testing(set_P_split) 
+  set_P_split <- initial_split(soils_df_wrang_SP,prop = 0.8, strata = P) 
+  
+  set_P_train <- training(set_P_split) %>%
+    select(c(P,Comp.1:NDVI)) %>%
+    na.omit()
+  
+  set_P_test <- testing(set_P_split) %>%
+    select(c(P,Comp.1:NDVI)) %>%
+    na.omit()
   
   ggplot() +
   geom_density(data = set_P_train, 
@@ -246,12 +252,74 @@ set.seed(623)
   set_P_strata <-  set_P_train %>%
   dplyr::select(-c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'Zn','x','y'))
 
-  set_df_P_strata <- train(P ~ ., data = set_P_strata, method = "rf", trControl = trainControl)
+  # Create the trainControl object
+  control <- trainControl(method = "cv", number = 10) # Example: 10-fold cross-validation
   
+  # Use the train function
+  set_df_P_strata <- train(P ~ ., 
+                           data = set_P_train, 
+                           method = "rf", 
+                           trControl = control)
   # print(set_df_P_strata)
   # 
   #predictors(set_df_P_strata)
   
+  P_predict_strata8_points <- predict(set_df_P_strata, set_P_test) %>%
+    cbind(set_P_test) %>%
+    rename(observed = P) %>%
+    rename(predicted = ".") %>%
+    mutate(observed_class = case_when(
+      observed <= 30 ~ "Apply 140 lbs of P205 per acre",
+      observed <= 60 ~ "Apply 105 lbs of P205 per acre",
+      observed <= 100 ~ "Apply 75 lbs of P205 per acre",
+      observed > 100 ~ "Apply 0 lbs of P205 per acre"
+    )) %>%
+    mutate(predicted_class = case_when(
+      predicted <= 30 ~ "Apply 140 lbs of P205 per acre",
+      predicted <= 60 ~ "Apply 105 lbs of P205 per acre",
+      predicted <= 100 ~ "Apply 75 lbs of P205 per acre",
+      predicted > 100 ~ "Apply 0 lbs of P205 per acre"
+    ))
+
+  comparison_cleaned_rf8 <- data.frame(
+      True_Category = P_predict_strata8_points$observed_class,  # True categories from set_P_test
+      Cleaned_RF_Category = P_predict_strata8_points$predicted_class  # Extracted and reclassified raster categories
+    )
+  
+  confusion_cleaned_rf8 <- confusionMatrix(
+    factor(comparison_cleaned_rf8$Cleaned_RF_Category, 
+           levels = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        )),
+    factor(comparison_cleaned_rf8$True_Category, 
+           levels = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        ))
+      )
+  
+cm_rf <- as.matrix(confusion_cleaned_rf8$table)  # Extract the confusion matrix as a matrix
+
+# Melt the confusion matrix for ggplot2
+cm_rf_melted <- melt(cm_rf)
+
+# Create the confusion matrix plot
+rf_confusionmatrix <- ggplot(data = cm_rf_melted, aes(x = Reference, y = Prediction, fill = value))+
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue") +
+  geom_text(aes(label = value), color = "black", size = 5) +
+  labs(title = "Confusion Matrix for Random Forest", x = "Reference (True)", y = "Prediction") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("../Local Data- DO NOT PUSH/rf_confusionmatrix.png", dpi = 300, 
+       width = 8, height = 6, units = "in")
+
   P_predict_strata8 <- terra::predict(covariates, set_df_P_strata, na.rm=TRUE)
   #if want to reinclude points:
 
@@ -264,6 +332,10 @@ set.seed(623)
   plot(P_predict_strata8, main = "P RF Stratified")
   
 #Kriging:
+    set_P_train <- training(set_P_split) %>%
+    select(c(P,Comp.1:y)) %>%
+    na.omit()
+  
     coordinates(set_P_train) <- ~x + y  # Replace `x` and `y` with the actual coordinate column names
     # Assign the CRS
     proj4string(set_P_train) <- CRS("+proj=utm +zone=17 +datum=NAD83 +units=m +no_defs")
@@ -275,7 +347,142 @@ set.seed(623)
     P_krig_SP8 <- Krig(P ~ 1, set_P_train8, "Sph")
     # Save Raster
     writeRaster(P_krig_SP8, "../Local Data- DO NOT PUSH/krig rasters/single point/P_krig_SP8.tif", overwrite = TRUE)
+    
+    
+set_P_train_vect <- st_as_sf(
+  set_P_train, 
+  coords = c("x", "y")           # Assign the CRS (UTM Zone 17, NAD83)
+)  # UTM Zone 17, NAD83
 
+set_P_train_vect <- st_set_crs(set_P_train_vect, 26917)  # Set the CRS to UTM Zone 17, NAD83
+
+st_crs(set_P_train_vect)  # Check the CRS`
+
+plot(set_P_train_vect)
+
+target_raster <- rast(xmin = 242702, xmax = 244127, ymin = 3591422, ymax = 3592341  , 
+                      resolution = 1, crs = "EPSG:26917")
+
+target_points <- st_as_sf(as.points(target_raster))  # Extract grid coordinates
+
+plot(target_points)
+
+variogram_model <- variogram(P ~ 1, data = set_P_train)
+
+fitted_model <- fit.variogram(variogram_model, model = vgm("Sph"))
+
+kriging_result <- gstat::krige(
+  formula = P ~ 1, 
+  locations = set_P_train_vect, 
+  newdata = target_points, 
+  model = fitted_model
+)
+
+target_raster[] <- kriging_result$var1.pred  # Assign predictions to raster
+plot(target_raster, main = "Kriging Predictions")
+
+set_P_test <- testing(set_P_split) %>%
+    select(c(P,Comp.1:y)) %>%
+    na.omit()
+
+set_P_test_vect <- st_as_sf(
+  set_P_test, 
+  coords = c("x", "y")           # Assign the CRS (UTM Zone 17, NAD83)
+)  # UTM Zone 17, NAD83
+
+set_P_test_vect <- st_set_crs(set_P_test_vect, 26917)  # Set the CRS to UTM Zone 17, NAD83
+
+st_crs(set_P_test_vect)
+
+set_P_test_extracted<-extract(target_raster, set_P_test_vect,
+                           bind = TRUE) %>%
+                  st_as_sf() %>%
+                  rename(predicted = lyr.1) %>%
+                  rename(observed = P) %>%
+                  mutate(observed_class = case_when(
+                    observed <= 30 ~ "Apply 140 lbs of P205 per acre",
+                    observed <= 60 ~ "Apply 105 lbs of P205 per acre",
+                    observed <= 100 ~ "Apply 75 lbs of P205 per acre",
+                    observed > 100 ~ "Apply 0 lbs of P205 per acre"
+                  )) %>%
+                  mutate(predicted_class = case_when(
+                    predicted <= 30 ~ "Apply 140 lbs of P205 per acre",
+                    predicted <= 60 ~ "Apply 105 lbs of P205 per acre",
+                    predicted <= 100 ~ "Apply 75 lbs of P205 per acre",
+                    predicted > 100 ~ "Apply 0 lbs of P205 per acre"
+                  ))
+
+  comparison_cleaned_krige8 <- data.frame(
+      True_Category = set_P_test_extracted$observed_class,  # True categories from set_P_test
+      Cleaned_RF_Category = set_P_test_extracted$predicted_class  # Extracted and reclassified raster categories
+    )
+  
+  confusion_cleaned_krige8 <- confusionMatrix(
+    factor(comparison_cleaned_krige8$Cleaned_RF_Category, 
+           levels = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        )),
+    factor(comparison_cleaned_krige8$True_Category, 
+           levels = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        ))
+      )
+  
+cm_krige <- as.matrix(confusion_cleaned_krige8$table)  # Extract the confusion matrix as a matrix
+
+# Melt the confusion matrix for ggplot2
+cm_krige_melted <- melt(cm_krige)
+
+# Create the confusion matrix plot
+krige_confusionmatix<-ggplot(data = cm_krige_melted, aes(x = Reference, y = Prediction, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue") +
+  geom_text(aes(label = value), color = "black", size = 5) +
+  labs(title = "Confusion Matrix for Ordinary Kriging", x = "Reference (True)", y = "Prediction") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("../Local Data- DO NOT PUSH/kriged_confusion_matrix8.png", dpi = 300, 
+       width = 8, height = 6, units = "in")
+#McNears new:
+# Step 1: Manually sum diagonal (correct) and off-diagonal (incorrect) elements
+rf_correct <- sum(c(23, 0, 0, 0))  # Diagonal elements for RF
+rf_incorrect <- sum(c(3, 2, 0, 0))  # Off-diagonal elements for RF
+
+krige_correct <- sum(c(25, 0, 0, 0))  # Diagonal elements for Kriged
+krige_incorrect <- sum(c(3, 0, 0, 0))  # Off-diagonal elements for Kriged
+
+# Step 2: Create a 2x2 contingency table
+contingency_table <- matrix(c(rf_correct, rf_incorrect, krige_correct, krige_incorrect),
+                            nrow = 2,
+                            byrow = TRUE,
+                            dimnames = list(
+                              Classifier = c("RF", "Kriged"),
+                              Outcome = c("Correct", "Incorrect")
+                            ))
+
+print("Contingency Table:")
+print(contingency_table)
+
+# Step 3: Perform McNemar's Test
+mcnemar_result <- mcnemar.test(contingency_table)
+
+# Display the results
+print("McNemar's Test Results:")
+print(mcnemar_result)
+
+
+
+
+
+
+#------------------------------------------------------------------------------
 #classification:
     P_rf_clip_strata8 <- terra::mask(P_predict_strata8, border)
     P_krig_clip8 <- terra::mask(P_krig_SP8, border)

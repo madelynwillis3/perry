@@ -1,0 +1,68 @@
+---
+title: "Adv_Spat_Analysis_class_clean_data"
+format: html
+---
+
+```{r packages}
+library(sf)
+library(tidyverse)
+library(raster)
+library(terra)
+library(ggplot2)
+library(viridis)
+library(corrr)
+library(rstac)
+library(ggcorrplot)
+library(GGally)
+library(randomForest)
+library(sp)
+library(gstat)
+library(automap)
+library(tmap)
+library(parallel)
+library(caret)
+library(factoextra)
+library(corrplot)
+library(tidymodels)
+library(glmnet)
+library(vip)
+library(tidyterra)
+```
+
+
+```{r Load Data}
+# Load the data
+soil_points <- read_csv("../Local Data- DO NOT PUSH/soil_points.csv") %>%
+  #change x y to crs 4326:
+  st_as_sf(coords = c("x", "y"), crs = 4326) %>%
+  #keep rows to ID, Label, Row, LBC.1, LBCeq, pH.2, Ca, K, Mg, Mn, P Zn
+  dplyr::select(ID, Label, Row, type, LBC.1, LBCeq, pH.2, Ca, K, Mg, Mn, P, Zn) 
+#keep all points with type being CID:
+SPID_points <- soil_points %>%
+  filter(type == "SPID") %>%
+  dplyr::select(-type)
+
+# Transform to UTM 
+sf_utm <- st_transform(SPID_points, crs = 32617) # UTM zone 17N
+
+# Extract coordinates in meters
+utm_coords <- st_coordinates(sf_utm)
+SPID_points$Easting <- utm_coords[,1]
+SPID_points$Northing <- utm_coords[,2]
+
+#clean to use for class:
+SPID_points <- SPID_points %>%
+  st_drop_geometry() %>% # Drop geometry column if not needed 
+  dplyr::select(-LBC.1, -LBCeq,-Label,-Row, pH.2, Ca, K, Mg, Mn, P, Zn) %>%
+  rename(pH = pH.2, x = Easting, y = Northing)
+
+#plot easting and northing with satellite basemap and colored points:
+ggplot() +
+  geom_point(data = SPID_points, aes(x = x, y = y), color = "blue", size = 2) +
+  labs(title = "SPID Soil Sample Locations", x = "Easting (m)", y = "Northing (m)") +
+  theme_minimal()
+
+# Write to CSV
+write.csv(SPID_points, "../Output/Perry_soil_surface_data.csv", row.names = FALSE)
+```
+

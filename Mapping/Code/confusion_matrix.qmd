@@ -1,0 +1,76 @@
+---
+title: "confusion_matrix"
+format: html
+---
+
+```{r}
+library(ggplot2)
+library(reshape2) # For reshaping the data
+
+# Recreate confusion matrix tables based on the provided data structure
+rf8_table <- matrix(c(6, 17, 1, 0, 
+                      0, 3, 0, 0, 
+                      0, 0, 0, 0, 
+                      0, 0, 0, 0), 
+                    nrow = 4, byrow = TRUE,
+                    dimnames = list(
+                      Prediction = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        ),
+                      Reference = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        )))
+
+
+rs8_table <-
+
+kriged8_table <- matrix(c(25, 0, 0, 0, 
+                          3, 0, 0, 0, 
+                          0, 0, 0, 0, 
+                          0, 0, 0, 0), 
+                        nrow = 4, byrow = TRUE,
+                        dimnames = list(
+                          Prediction = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        ),
+                          Reference = c(
+          "Apply 140 lbs of P205 per acre", 
+          "Apply 105 lbs of P205 per acre",
+          "Apply 75 lbs of P205 per acre", 
+          "Apply 0 lbs of P205 per acre"
+        )
+                        ))
+
+# Function to create a confusion matrix plot
+plot_confusion_matrix <- function(confusion_table, title) {
+  # Convert the matrix into a long format
+  confusion_long <- melt(confusion_table, varnames = c("Prediction", "Reference"), value.name = "Count")
+  
+  # Create the heatmap using ggplot2
+  ggplot(data = confusion_long, aes(x = Reference, y = Prediction, fill = Count)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Count), color = "black", size = 4) +
+    scale_fill_gradient(low = "white", high = "red") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = title, x = "Reference", y = "Prediction", fill = "Count")
+}
+
+# Generate plots
+plot_rf8 <- plot_confusion_matrix(rf8_table, "Confusion Matrix: Random Forest")
+plot_kriged8 <- plot_confusion_matrix(kriged8_table, "Confusion Matrix: Ordinary Kriging")
+
+# Display the plots
+print(plot_rf8)
+print(plot_kriged8)
+```
+

@@ -1,0 +1,306 @@
+---
+title: "Perry_Mapping_Bootstrapped_06_03_2025"
+format: html
+---
+
+##Unloading Necessary Packages
+```{r Packages, include=FALSE}
+#chunk options
+knitr::opts_chunk$set(echo = TRUE)
+
+    #libraries
+library(sf)
+library(tidyverse)
+library(raster)
+library(terra)
+library(ggplot2)
+library(viridis)
+library(corrr)
+library(rstac)
+library(ggcorrplot)
+library(GGally)
+library(randomForest)
+library(sp)
+library(gstat)
+library(automap)
+library(tmap)
+library(parallel)
+library(caret)
+library(factoextra)
+library(corrplot)
+library(tidymodels)
+library(glmnet)
+library(vip)
+library(pheatmap)
+library(tidyterra)
+```
+
+##Pulling Data & Imagery
+
+
+```{r ALL data pull, message = FALSE}
+# Read soil points and pivot to long format
+soil_points <- st_read("../Local Data- DO NOT PUSH/fixed_soil_points2.shp") %>%
+  pivot_longer(cols = c("CID", "SPID"), names_to = "type", values_to = "ID")
+
+# Read AESL data and merge by sample ID
+AESL_csv <- read.csv("../Local Data- DO NOT PUSH/Perry_all_samples_all(in).csv")
+soil_points <- left_join(soil_points, AESL_csv, by = "ID")
+
+# Write merged sample data to CSV
+write_csv(soil_points, "../Local Data- DO NOT PUSH/soil_points.csv")
+
+# --- 2. Define Analysis Extent (Buffered Border) ---
+
+border <- vect("../Local Data- DO NOT PUSH/Border/border_17N.shp")
+border_ext <- ext(border)
+buffer <- 100  # buffer distance in map units (e.g., meters)
+expanded_ext <- ext(
+  xmin(border_ext) - buffer,
+  xmax(border_ext) + buffer,
+  ymin(border_ext) - buffer,
+  ymax(border_ext) + buffer
+)
+
+# --- 3. Read and Prepare Rasters ---
+
+# Helper function: project, set extent, and resample to template
+prep_raster <- function(r, template, crs, ext) {
+  r_proj <- project(r, crs)
+  ext(r_proj) <- ext
+  resample(r_proj, template)
+}
+
+# Read template raster (DEM_50)
+DEM_50 <- rast("../Data/DEM50_rasters/Elevation_50cm.tif")
+DEM_50 <- project(DEM_50, "EPSG:32617")
+ext(DEM_50) <- expanded_ext
+template <- DEM_50
+
+# Read and prep additional rasters
+DEM_25_files <- list.files("../Data/DEM25m_rasters/", pattern = "\\.tif$", full.names = TRUE)
+DEM_25 <- rast(DEM_25_files)
+
+topos_50cm_files <- list.files("../Data/DEM50_rasters/", pattern = "\\.tif$", full.names = TRUE)
+topos_50cm <- rast(topos_50cm_files)
+# Assign unique informative names using file stems
+names(topos_50cm) <- make.unique(tools::file_path_sans_ext(basename(topos_50cm_files)))
+
+PCA_SR    <- rast("../Local Data- DO NOT PUSH/PCA_SR.tif")
+NDVI      <- rast("../Local Data- DO NOT PUSH/NDVI.tif")
+
+# Standardize rasters
+DEM_25_prepped    <- prep_raster(DEM_25, template, "EPSG:32617", expanded_ext)
+topos_50cm$Geomorphons_50cm <- as.factor(topos_50cm$Geomorphons_50cm)
+Geomorphons_50cm_prepped <- topos_50cm$Geomorphons_50cm %>%
+    project(DEM_50, method = "near") %>%
+    resample(DEM_50, method = "near") %>%
+    as.factor()
+topos_50cm_prepped <- prep_raster(topos_50cm, template, "EPSG:32617", expanded_ext)
+topos_50cm_prepped$Geomorphons_50cm <- Geomorphons_50cm_prepped
+names(topos_50cm_prepped) <- names(topos_50cm) # Ensure names are retained after prepping
+
+PCA_SR_prepped    <- prep_raster(PCA_SR, template, "EPSG:32617", expanded_ext)
+NDVI_prepped      <- prep_raster(NDVI, template, "EPSG:32617", expanded_ext)
+
+# --- 4. Stack Covariate Rasters ---
+
+DEM_50_stack <- c(template, DEM_25_prepped, PCA_SR_prepped, NDVI_prepped, topos_50cm_prepped)
+
+# Check for duplicate names and stop if found
+if(any(duplicated(names(DEM_50_stack)))) stop("Layer names in DEM_50_stack are not unique!")
+
+# (Optional) print names for debugging
+print(names(DEM_50_stack))
+
+terra::writeRaster(DEM_50_stack, "../Output/DEM_50_stack.tif", overwrite = TRUE)
+```
+
+
+```{r correlation , message=FALSE}
+
+
+# --- 1. Split by Data Type ---
+soil_points_SP <- filter(soil_points, type == "SPID")
+soil_points_C  <- filter(soil_points, type == "CID")
+
+# --- 2. Convert to vect objects ---
+soil_points_vect_SP <- vect(soil_points_SP)
+soil_points_vect_C  <- vect(soil_points_C)
+
+# --- 3. Extract Raster Values at Sample Points ---
+extract_raster_values <- function(points_vect, raster) {
+  result <- terra::extract(raster, points_vect, bind = TRUE, xy = TRUE)
+  as.data.frame(result)
+}
+
+soils_df_SP <- extract_raster_values(soil_points_vect_SP, DEM_50)
+soils_df_C  <- extract_raster_values(soil_points_vect_C, DEM_50)
+
+# --- 4. Select Soil Property Columns ---
+soil_property_cols <- c('LBC.1', 'LBCeq', 'pH.2', 'Ca', 'K', 'Mg', 'Mn', 'P', 'Zn')
+
+soil_df_cols_SP <- select(soils_df_SP, all_of(soil_property_cols))
+soil_df_cols_C  <- select(soils_df_C, all_of(soil_property_cols))
+
+# --- 5. Exclude Non-Essential Columns (first 9 columns) ---
+soils_df_wrang_SP <- soils_df_SP[, -(1:9)]
+soils_df_wrang_C  <- soils_df_C[, -(1:9)]
+
+```
+```{r Correlation Matrix}
+
+# Extract all raster values at point locations
+extracted_covariatesSP <- terra::extract(DEM_50_stack, soil_points_vect_SP, bind = TRUE)
+extracted_covariatesC <- terra::extract(DEM_50_stack, soil_points_vect_C, bind = TRUE)
+
+# Combine extracted raster values with soil properties
+combined_dataSP <- cbind(
+  soil_points_singlepoint, 
+  extracted_covariatesSP[ , !(names(extracted_covariatesSP) %in% c("ID"))]
+)
+combined_dataC <- cbind(
+  soil_points_composite,   # <-- FIXED: use composite points for C
+  extracted_covariatesC[ , !(names(extracted_covariatesC) %in% c("ID"))]
+)
+cols_of_interest <- c(
+  "LBC.1", "LBCeq", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn",  # soil properties
+  names(DEM_50_stack)                                           # raster variable names
+)
+# Ensure columns exist in the combined data
+cols_of_interest <- intersect(cols_of_interest, names(combined_dataSP))
+
+# Create correlation matrix (removing rows with NAs)
+corr_matrixSP <- combined_dataSP %>%
+  st_drop_geometry() %>%
+  select(all_of(cols_of_interest)) %>%
+  filter(complete.cases(.))
+  # cor(use = "complete.obs")
+
+#convert to data table bc famd is silly
+corr_matrixSP <- corr_matrixSP %>%
+  data.table::data.table()
+
+#onehot encode option:
+corr_matrixSP_onehot<-corr_matrixSP %>%
+  data.table::data.table() %>%
+  mltools::one_hot()
+
+
+#only numeric in corr matrices:
+corr_matrixSP_onehot_matrix<-corr_matrixSP_onehot %>%
+  cor(use = "complete.obs")
+
+pheatmap(corr_matrixSP_onehot_matrix, 
+         cluster_rows = FALSE, cluster_cols = FALSE, 
+         main = "Single Point: Correlation (Predictors vs Nutrients) Hot-encoded",
+         angle_col = 45, display_numbers = TRUE, fontsize_number = 8)
+
+
+famd_matrixSP<-FactoMineR::FAMD(corr_matrixSP) 
+
+factoextra::fviz_famd_var(famd_matrixSP)
+
+corr_matrixC <- combined_dataC %>%
+  st_drop_geometry() %>%
+  select(all_of(cols_of_interest)) %>%
+  cor(use = "complete.obs")
+
+nutrients <- c("LBC.1", "LBCeq", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+predictors <- setdiff(colnames(corr_matrixSP), nutrients)
+sub_corrSP <- corr_matrixSP[predictors, nutrients]
+sub_corrC  <- corr_matrixC[predictors, nutrients]
+
+
+
+pheatmap(sub_corrSP, 
+         cluster_rows = FALSE, cluster_cols = FALSE, 
+         main = "Single Point: Correlation (Predictors vs Nutrients)",
+         angle_col = 45, display_numbers = TRUE, fontsize_number = 8)
+
+pheatmap(sub_corrC, 
+         cluster_rows = FALSE, cluster_cols = FALSE, 
+         main = "Composite: Correlation (Predictors vs Nutrients)",
+         angle_col = 45, display_numbers = TRUE, fontsize_number = 8)
+```
+```{r}
+n_bootstrap <- 100
+train_frac <- 0.7
+nutrients <- c("LBC.1", "LBCeq", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn") # Add more as needed
+
+# --- BOOTSTRAP SPLIT FUNCTION ---
+bootstrap_split <- function(df, n_bootstrap, train_frac) {
+  boot_list <- vector("list", n_bootstrap)
+  n <- nrow(df)
+  train_n <- floor(n * train_frac)
+  for (i in seq_len(n_bootstrap)) {
+    set.seed(i)
+    idx <- sample(seq_len(n))
+    train_idx <- idx[1:train_n]
+    test_idx <- idx[(train_n + 1):n]
+    boot_list[[i]] <- list(
+      train = df[train_idx, , drop=FALSE],
+      test  = df[test_idx, , drop=FALSE]
+    )
+  }
+  boot_list
+}
+
+# --- MAIN WORKFLOW ---
+for (nutrient in nutrients) {
+  # For both SP and C datasets
+  for (data_name in c("SP", "C")) {
+    df <- get(paste0("soils_df_wrang_", data_name)) # expects your dataframes in env
+    boot_list <- bootstrap_split(df, n_bootstrap, train_frac)
+    for (b in seq_len(n_bootstrap)) {
+      train_set <- boot_list[[b]]$train
+      test_set  <- boot_list[[b]]$test
+
+      # --- RANDOM FOREST ---
+      predictors <- setdiff(names(train_set), c(nutrients, "x", "y"))
+      rf_formula <- as.formula(paste(nutrient, "~ ."))
+      train_rf <- train_set %>% select(all_of(c(nutrient, predictors)))
+      control <- trainControl(method = "cv", number = 10)
+      # Skip bootstraps with only one unique value (classification error prevention)
+      if (length(unique(train_rf[[nutrient]])) < 2) next
+      rf_model <- train(rf_formula, data = train_rf, method = "rf", trControl = control)
+      pred_rf <- predict(rf_model, test_set)
+
+      # --- KRIGING ---
+      krig_train <- train_set %>% select(all_of(c(nutrient, "x", "y")), everything()) %>% na.omit()
+      krig_test  <- test_set  %>% select(all_of(c(nutrient, "x", "y")), everything()) %>% na.omit()
+      coordinates(krig_train) <- ~ x + y
+      proj4string(krig_train) <- CRS("+proj=utm +zone=17 +datum=NAD83 +units=m +no_defs")
+      coordinates(krig_test) <- ~ x + y
+      proj4string(krig_test) <- CRS("+proj=utm +zone=17 +datum=NAD83 +units=m +no_defs")
+      vgm_model <- variogram(as.formula(paste(nutrient, "~ 1")), data = krig_train)
+      fitted_model <- fit.variogram(vgm_model, model = vgm("Sph"))
+      krig_pred <- gstat::krige(as.formula(paste(nutrient, "~ 1")), locations = krig_train, newdata = krig_test, model = fitted_model)
+      test_set$krig_pred <- krig_pred$var1.pred
+
+      # --- CLASSIFICATION (optional, by nutrient) ---
+      if (nutrient == "P") {
+        test_set <- test_set %>%
+          mutate(rf_class = classify_P(pred_rf),
+                 krig_class = classify_P(krig_pred$var1.pred))
+      } else if (nutrient == "K") {
+        test_set <- test_set %>%
+          mutate(rf_class = classify_K(pred_rf),
+                 krig_class = classify_K(krig_pred$var1.pred))
+      } else if (nutrient == "Mg") {
+        test_set <- test_set %>%
+          mutate(rf_class = classify_Mg(pred_rf, .data[["pH.2"]]),
+                 krig_class = classify_Mg(krig_pred$var1.pred, .data[["pH.2"]]))
+      } else if (nutrient == "Zn") {
+        test_set <- test_set %>%
+          mutate(rf_class = classify_Zn(pred_rf),
+                 krig_class = classify_Zn(krig_pred$var1.pred))
+      }
+      # Save, print, or analyze as needed
+      # Example: print(table(test_set$rf_class, test_set$krig_class))
+    }
+  }
+}
+```
+
+

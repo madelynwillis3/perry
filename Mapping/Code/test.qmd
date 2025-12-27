@@ -1,0 +1,145 @@
+---
+title: "Perry_analysis"
+author: "Madelyn Willis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Unloading Necessary Packages
+```{r Packages, include=FALSE}
+# Load required libraries
+library(sf)
+library(tidyverse)
+library(terra)
+library(caret)
+library(randomForest)
+library(ggplot2)
+```
+
+## Data Preparation
+```{r Data Preparation}
+# Load spatial and tabular data
+soil_points <- st_read("../Local Data- DO NOT PUSH/surface_points_perry_corrected.shp") %>%
+  pivot_longer(cols = c("CID", "SPID"), names_to = "type", values_to = "ID")
+soil_all <- read.csv("../Local Data- DO NOT PUSH/Perry_all_samples_all(in).csv")
+soil_points <- merge(soil_points, soil_all, by = "ID")
+
+# Load raster covariates
+covariates <- c(
+  rast("../Local Data- DO NOT PUSH/PCA_SR.tif"),
+  rast("../Local Data- DO NOT PUSH/clipped_stack.tif"),
+  rast("../Local Data- DO NOT PUSH/NDVI.tif")
+)
+names(covariates) <- make.names(names(covariates))
+
+# Extract raster values at soil sample points
+soil_points_sp <- vect(soil_points)
+soil_points_extracted <- terra::extract(covariates, soil_points_sp, bind = TRUE, xy = TRUE) %>%
+  as.data.frame()
+
+# Filter relevant columns
+soil_vars <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+soil_data <- soil_points_extracted[, c(soil_vars, names(covariates))]
+```
+
+## Train-Test Split
+```{r Train-Test Split}
+# Perform an 80/20 split of the entire dataset
+set.seed(626)  # For reproducibility
+split <- caret::createDataPartition(1:nrow(soil_data), p = 0.8, list = FALSE)
+train_data <- soil_data[split, ]
+test_data <- soil_data[-split, ]
+```
+
+## Random Forest and Prediction
+```{r Random Forest and Prediction}
+run_rf <- function(response, train_data, covariates, output_path) {
+  # Ensure the response variable exists in train_data
+  if (!response %in% colnames(train_data)) {
+    stop(paste("The response variable", response, "is not found in the training data."))
+  }
+  
+  # Exclude nutrient variables from predictors
+  predictors <- setdiff(colnames(train_data), soil_vars)
+  
+  # Train random forest model
+  train_control <- trainControl(method = "cv", number = 5)
+  rf_model <- train(reformulate(termlabels = predictors, response = response), 
+                    data = train_data, method = "rf", trControl = train_control)
+  
+  # Predict raster values
+  prediction <- terra::predict(covariates, rf_model, na.rm = TRUE)
+  terra::writeRaster(prediction, output_path, overwrite = TRUE)
+  return(prediction)
+}
+
+# Loop through all nutrients and train models
+for (var in soil_vars) {
+  rf_output_path <- paste0("../Local Data- DO NOT PUSH/rf nutrient rasters/", var, "_rf.tif")
+  print(paste("Processing nutrient:", var))
+  prediction <- run_rf(var, train_data, covariates, rf_output_path)
+  plot(prediction, main = paste(var, "Random Forest Prediction"))
+}
+```
+
+## Kriging for Single Points
+```{r Kriging Single Points}
+# Nutrients and their variogram models
+variogram_models <- c(LBC.1 = "Sph", pH.2 = "Exp", Ca = "Sph", 
+                      K = "Lin", Mg = "Sph", Mn = "Nug", 
+                      P = "Lin", Zn = "Nug")
+
+# Loop through nutrients and perform kriging
+for (var in names(variogram_models)) {
+  tryCatch({
+    formula <- as.formula(paste(var, "~ 1"))
+    krig_output_path <- paste0("../Local Data- DO NOT PUSH/krig rasters/single point/", var, "_krig_SP.tif")
+    print(paste("Processing kriging for single point nutrient:", var))
+    kriged <- run_kriging(formula, soil_points_single, grid, variogram_models[[var]], krig_output_path)
+    plot(kriged, main = paste(var, "Kriging - Single Points"))
+  }, error = function(e) {
+    print(paste("Error processing kriging for single point nutrient:", var, " - ", e$message))
+  })
+}
+```
+
+## Kriging for Composite Points
+```{r Kriging Composite Points}
+# Loop through nutrients and perform kriging
+for (var in names(variogram_models)) {
+  tryCatch({
+    formula <- as.formula(paste(var, "~ 1"))
+    krig_output_path <- paste0("../Local Data- DO NOT PUSH/krig rasters/composite/", var, "_krig_C.tif")
+    print(paste("Processing kriging for composite point nutrient:", var))
+    kriged <- run_kriging(formula, soil_points_composite, grid, variogram_models[[var]], krig_output_path)
+    plot(kriged, main = paste(var, "Kriging - Composite Points"))
+  }, error = function(e) {
+    print(paste("Error processing kriging for composite point nutrient:", var, " - ", e$message))
+  })
+}
+```
+
+---
+---
+
+### Key Features of the Updated Workflow
+
+1. **Single Train-Test Split**:
+   - A single 80/20 split is done on the dataset using `caret::createDataPartition`.
+   - The same training set (`train_data`) is used to train all nutrient models.
+
+2. **Random Forest Training and Prediction**:
+   - A function `run_rf` handles training and prediction for each nutrient.
+   - The corresponding nutrient raster is saved to disk using `terra::writeRaster`.
+
+3. **Streamlined Loop**:
+   - A single loop iterates through all nutrient variables (`soil_vars`).
+   - Each nutrient is trained and predicted independently using the same `train_data`.
+
+### Output
+This workflow ensures that:
+- Every nutrient is modeled and predicted independently.
+- A single train-test split is used across all nutrients.
+- Predicted rasters for each nutrient are saved as GeoTIFF files.
+
+Let me know if you need further adjustments!

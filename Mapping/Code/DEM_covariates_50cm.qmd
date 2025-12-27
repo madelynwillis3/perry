@@ -1,0 +1,363 @@
+---
+title: "DEM_covariates_50cm"
+format: html
+---
+
+```{r packages, message=FALSE}
+# Load required libraries
+library(colorspace)
+library(aqp)
+library(soilDB)
+library(dendextend)
+library(latticeExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(SoilTaxonomy)
+library(dplyr)
+library(janitor)
+library(tidyr)
+library(stringr)
+library(cluster)
+library(terra)
+library(scico)
+library(randomForest)
+library(leaflet)
+library(tidymodels)
+library(tidyverse)
+library(vip)
+library(ranger)
+library(finetune)
+library(beepr)
+library(tmap)
+library(sf)
+library(terra)
+library(RSAGA)
+library(spatialEco)
+library(randomForest)
+```
+
+```{r}
+#pull data
+border <- terra::vect(("../Local Data- DO NOT PUSH/Border/border.shp"))
+border <- terra::project(border, "epsg:4326")
+border_ext <-ext(border)
+DEM50 <-  terra::rast("../Local Data- DO NOT PUSH/DEM rasters/DEM_50cm.tif") %>%
+  terra::project("epsg:4326") %>%
+  terra::crop(border_ext) %>%
+  terra::mask(border)
+geomorphons <- terra::rast("../Data/DEM50_rasters/Geomorphons.tif")
+twi <- terra::rast("../Data/DEM50_rasters/Topographic Wetness Index.tif")
+#observe gap:
+na_cells <- is.na(DEM50)
+plot(na_cells, col = c(NA, "blue"), legend = FALSE, 
+     main = "NA Cells in DEM")
+
+#fill:
+window <- matrix(1, nrow = 21, ncol = 21)
+
+# Create a version where NA cells are replaced with the mean of neighbors
+dem_filled <- focal(DEM50, w = window, fun = mean, na.policy = 'only', na.rm = TRUE)
+
+# Copy the original DEM
+dem_final <- DEM50
+
+# Replace only the NA cells in the original with the interpolated ones
+values(dem_final)[is.na(values(DEM50))] <- values(dem_filled)[is.na(values(DEM50))]
+
+plot(DEM50, main = "Original DEM with Hole")
+#crop by border again:
+dem_final <- terra::mask(dem_final, border)
+plot(dem_final, main = "DEM with Hole Filled")
+
+terra::writeRaster(dem_final, "../Output/dem_filled.tif", overwrite = TRUE)
+
+
+#reproject
+ref_raster <- dem_final  # or whichever covariate you want to match
+deg_per_25m <- 25 / 111320  # ≈ 0.0002246 degrees
+
+template25 <- rast(
+  extent = ext(ref_raster),   # exact extent to match
+  resolution = deg_per_25m,   # 25m in degrees
+  crs = crs(ref_raster)       # same CRS as your covariates
+)
+
+dem_25m <- resample(dem_final, template25, method = "bilinear")
+# ext(dem_25m) <- ext(ref_raster)  # Ensure extent matches template
+terra::writeRaster(dem_25m, "../Data/resamples/dem_25m.tif", overwrite = TRUE)
+
+# # To check:
+res(dem_25m)
+crs(dem_25m)
+ext(dem_final)
+
+#resample to 1m DEM:
+# Create a template raster for 1m resolution
+deg_per_1m <- 1 / 111320
+template1 <- rast(
+  extent = ext(ref_raster),   # exact extent to match
+  resolution = deg_per_1m,    # 1m in degrees
+  crs = crs(ref_raster)       # same CRS as your covariates
+)
+dem_1m <- resample(dem_final, template1, method = "bilinear")
+terra::writeRaster(dem_1m, "../Data/resamples/dem_1m.tif", overwrite = TRUE)
+
+#resample to 3m:
+deg_per_3m <- 3 / 111320
+template3 <- rast(
+  extent = ext(ref_raster),   # exact extent to match
+  resolution = deg_per_3m,    # 3m in degrees
+  crs = crs(ref_raster)       # same CRS as your covariates
+)
+dem_3m <- resample(dem_final, template3, method = "bilinear")
+terra::writeRaster(dem_3m, "../Data/resamples/dem_3m.tif", overwrite = TRUE)
+```
+
+```{r load saga tifs}
+#50cm:
+dem50_files <- list.files("../Data/DEM50_rasters/", pattern = "\\.tif$", full.names = TRUE)
+
+dem50_rasters <- lapply(dem50_files, terra::rast)
+names(dem50_rasters) <- gsub("\\.tif$", "", basename(dem50_files))
+
+dem_stack <- rast(dem50_rasters)
+
+#25m:
+dem25_files <- list.files("../Data/DEM25m_rasters/", pattern = "\\.tif$", full.names = TRUE)
+dem25_rasters <- lapply(dem25_files, terra::rast)
+names(dem25_rasters) <- gsub("\\.tif$", "", basename(dem25_files))
+dem25_stack <- rast(dem25_rasters)
+
+```
+
+
+```{r load soil data}
+#load soil data:
+soil_data <- read.csv("../Local Data- DO NOT PUSH/soil_points.csv") 
+
+#find variable importance of dem50_rasters (with the soil data used for variable importance being columns being LBC, pH, Ca, K, Mg, Mn, P, and Zn)
+soil_data <- soil_data %>%
+  select(ID, LBC.1, pH.2, Ca, K, Mg, Mn, P, Zn, x, y)
+# Extract coords from soil_data:
+soil_coords <- soil_data[, c("x", "y")]
+
+
+covariate_values <- terra::extract(dem_stack,soil_coords)
+# Combine with soil data (excluding x, y if present)
+model_data <- cbind(soil_data, covariate_values[,-1])  # -1 to drop ID column
+
+library(randomForest)
+library(dplyr)
+
+# Ensure column names are valid R names
+names(model_data) <- make.names(names(model_data))
+soil_vars <- make.names(c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn"))
+covariate_names <- setdiff(names(model_data), c("ID", soil_vars, "x", "y"))
+
+# Check what variables you actually have
+print("Soil variable columns in model_data:")
+print(soil_vars)
+print("Covariate columns in model_data:")
+print(covariate_names)
+
+varimp_list <- list()
+for (target in soil_vars) {
+  # Select only the response and predictor columns, drop NA rows
+  this_data <- model_data %>%
+    select(all_of(c(target, covariate_names))) %>%
+    na.omit()
+
+  # Check for enough data and variability
+  if (nrow(this_data) > 5 && length(unique(this_data[[target]])) > 1) {
+    formula <- as.formula(paste(target, "~", paste(covariate_names, collapse = "+")))
+    rf <- randomForest(formula, data = this_data, importance = TRUE)
+    vi <- randomForest::importance(rf)
+    if (is.vector(vi)) {
+      vi <- t(as.matrix(vi))
+      rownames(vi) <- covariate_names
+    }
+    varimp_list[[target]] <- vi
+  } else {
+    message(paste("Skipping", target, ": insufficient data or no variation"))
+    varimp_list[[target]] <- NULL
+  }
+}
+
+# Combine variable importance results into one summary data frame
+varimp_df <- do.call(rbind, lapply(names(varimp_list), function(var) {
+  vi <- varimp_list[[var]]
+  if (is.null(vi)) return(NULL)
+  incmse <- if ("IncMSE" %in% colnames(vi)) vi[, "IncMSE"] else NA
+  incnodepurity <- if ("IncNodePurity" %in% colnames(vi)) vi[, "IncNodePurity"] else NA
+  data.frame(
+    SoilVar = var,
+    Covariate = rownames(vi),
+    IncMSE = incmse,
+    IncNodePurity = incnodepurity
+  )
+}))
+
+print(varimp_df)
+library(dplyr)
+
+top_varimp <- varimp_df %>%
+  group_by(SoilVar) %>%
+  arrange(desc(IncNodePurity)) %>%
+  #get the top 5 in each soil var:
+  slice_head(n = 5) %>%
+print(top_varimp)
+```
+
+
+```{r corr matrix}
+# Select only relevant columns
+corr_data <- model_data[, c(soil_vars, covariate_names)]
+
+# Remove rows with any NAs
+corr_data <- na.omit(corr_data)
+
+# Calculate correlation matrix (will include both soil vars and covariates)
+corr_matrix <- cor(corr_data)
+
+# If you want only soil vars vs covariates (not all vs all):
+corr_matrix_soil_vs_covariates <- corr_matrix[soil_vars, covariate_names]
+
+library(corrplot)
+
+# Assuming you already have corr_matrix_soil_vs_covariates from previous code
+corrplot(corr_matrix_soil_vs_covariates,
+         method = 'color',
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         na.label = " ",
+         is.corr = FALSE,      # because this is not square
+         mar = c(0,0,2,0),
+         title = "Correlation: Soil Nutrients vs Covariates")
+```
+```{r}
+soil_points <- vect(soil_data[, c("x", "y")], geom = c("x", "y"), crs = "EPSG:4326")
+soil_points_utm <- project(soil_points, dem25_stack) # for 25m rasters
+
+# Extract values from the 50cm stack (already in lon/lat)
+vals_50cm <- terra::extract(dem_stack, soil_points)
+colnames(vals_50cm) <- paste0("dem50_", colnames(vals_50cm))
+
+# Extract values from the 25m stack (projected points)
+vals_25m <- terra::extract(dem25_stack, soil_points_utm)
+colnames(vals_25m) <- paste0("dem25_", colnames(vals_25m))
+
+# 2. Combine everything
+model_data <- cbind(
+  soil_data,
+  vals_50cm[,-1], # remove ID col from extract
+  vals_25m[,-1]   # remove ID col from extract
+)
+
+# 3. Select relevant columns for correlation
+soil_vars <- c("LBC.1", "pH.2", "Ca", "K", "Mg", "Mn", "P", "Zn")
+covariate_names_50cm <- colnames(model_data)[grepl("^dem50_", colnames(model_data))]
+covariate_names_25m  <- colnames(model_data)[grepl("^dem25_", colnames(model_data))]
+
+corr_data <- model_data[, c(soil_vars, covariate_names_50cm, covariate_names_25m)]
+corr_data <- na.omit(corr_data)
+corr_matrix <- cor(corr_data)
+corr_matrix_soil_vs_covariates <- corr_matrix[soil_vars, c(covariate_names_50cm, covariate_names_25m)]
+
+# 4. Plot
+corrplot(corr_matrix_soil_vs_covariates,
+         method = 'color',
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         na.label = " ",
+         is.corr = FALSE,
+         mar = c(0,0,2,0),
+         title = "Correlation: Soil Nutrients vs Covariates")
+```
+
+
+```{r}
+#start rsaga environment:
+saga_env <- RSAGA::rsaga.env(
+  path = "C:/Users/mrw78462/OneDrive - University of Georgia/Desktop/saga-9.8.1_x64", # Path to SAGA installation
+)
+# A list of modules in a library:
+rsaga.get.modules(libs = "ta_morphometry", env = saga_env)
+
+```
+
+
+```{r}
+
+#creation of topographic covariates based on DEM50:
+# Slope
+slope <- terrain(dem_final, v = "slope")
+
+# Aspect
+aspect <- terrain(dem_final, v = "aspect")
+
+# Hillshade
+hillshade <- shade(slope, aspect)
+#terrain roughness index:
+tri <- terrain(dem_final, v = "TRI")
+# Topographic Position Index (TPI)
+tpi <- terrain(dem_final, v = "TPI")
+# profile curvature
+profile.crv <- curvature(dem_final, type="profile")
+# planform curvature
+planform.crv <- curvature(dem_final, type="planform")
+# total curvature
+total.crv <- curvature(dem_final, type="total")
+#terrain ruggedness index:
+tri <- terrain(dem_final, v = "TRI")
+plot(tri)
+
+#rsagtri#rsaga curvature:
+rsaga.profile.curvature(
+  in.dem = "dem_filled.tif",
+  out.vcurv = "../Data/DEM50_rasters/vprofilecurv.tif",
+  #out.hcurv = "../Data/DEM50_rasters/horizontalcurv.tif",
+  #out.mcurv = "../Data/DEM50_rasters/meancurv.tif",
+  method = "poly2zevenbergen",
+  env = saga_env
+)
+
+#flow direction:
+FLD<- terrain(dem_final,          #  raster DEM
+    v="flowdir",             # flow direction
+    unit='degrees')                 # unit degree
+
+# spplot(FLD,
+#        main= "Flow Direction",
+#       col.regions=rgb.palette(100))
+
+
+#topographic wetness index:
+rsaga.wetness.index(
+  in.dem = "dem_filled.tif",
+  out.wetness = "../Data/DEM50_rasters/topographic_wetness_index.tif",
+  env = saga_env
+)
+
+```
+```{r save covariates}
+#save all covariates:
+covariates <- c(
+  dem_final$DEM_50cm,
+  slope,
+  aspect,
+  hillshade,
+  tri,
+  tpi,
+  profile.crv,
+  planform.crv,
+  total.crv,
+  FLD
+)
+#save to file:
+terra::writeRaster(covariates, "../Data/DEM50_rasters/DEM_covariates_50cm.tif", overwrite = TRUE)
+```
+
+
+

@@ -1,0 +1,367 @@
+---
+title: "AQP_test"
+author: "Madelyn Willis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Library Setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#remove pound symbols below if not yet installed 
+#install.packages("aqp") 
+#install.packages("soilDB")
+library(aqp)
+library(soilDB)
+#library(sharpshootR)
+library(dendextend)
+library(latticeExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(SoilTaxonomy)
+library(dplyr)
+library(janitor)
+library(tidyr)
+library(stringr)
+library(cluster)
+library(terra)
+```
+
+
+
+```{r Data Frame}
+
+FPspatial <-vect("../Data/Full Profile Data/Spatial/Perry_all_FP_samples.shp") #load spatial data
+# Load Perry data and wrangle
+data_frame <- read.csv("../Data/Full Profile Data/Final_Perry_FP_data_2025.csv", header = TRUE, sep = ",")
+data_frame <- data_frame %>%
+  janitor::clean_names() %>%
+  rename(id = sample_id_lab,
+         hzid = horizon) %>%
+  mutate(
+    top = as.numeric(sub("-.*", "", to_depth_cm)),
+    bottom = as.numeric(str_remove(sub(".*-", "", to_depth_cm), "\\+"))
+  )
+
+ 
+# Define mapping of texture abbrev.
+texture_map <- c(
+  "LS" = "loamy_sand", "SCL" = "sandy_clay_loam", "SL" = "sandy_loam", "L" = "loam",
+  "CL" = "clay_loam", "S" = "sand", "C" = "clay", "SIL" = "silt_loam",
+  "SI" = "silt", "SC" = "sandy_clay", "C " = "clay")
+
+# Replace texture abbreviations with full names
+data_frame <- data_frame %>%
+  mutate(texture = recode(lab_texture_lpsa_preliminary, !!!texture_map),
+    color_corrected = gsub("([A-Za-z]+)([0-9]+)", "\\1 \\2", matrix_color),
+    hue = sapply(strsplit(as.character(color_corrected), " "), function(x) x[1]),
+    value_chroma = sapply(strsplit(as.character(color_corrected), " "), function(x) x[2]),
+    value = sapply(strsplit(value_chroma, "/"), function(x) x[1]),
+    chroma = sapply(strsplit(value_chroma, "/"), function(x) x[2]),
+    color = munsell2rgb(the_hue = hue, the_value = value,  # Split the 'color' column into separate hue, value, and chroma components
+    the_chroma = chroma, return_triplets=FALSE),
+  )
+data_frame$rgb_values <- munsell2rgb(
+  the_hue = data_frame$hue,
+  the_value = as.numeric(data_frame$value),
+  the_chroma = as.numeric(data_frame$chroma),
+  return_triplets = TRUE
+)
+
+data_frame <- data_frame %>%
+  mutate(
+    red = rgb_values[, 1],
+    green = rgb_values[, 2],
+    blue = rgb_values[, 3]
+  )
+coords <- as.data.frame(terra::crds(FPspatial))  # extracts X and Y
+names(coords) <- c("lon", "lat")  # rename to match what `vect()` expects
+
+FPspatial_df <- as.data.frame(FPspatial)
+FPspatial_df <- bind_cols(FPspatial_df, coords)
+
+merged_df <- data_frame %>%
+  left_join(FPspatial_df %>% select(Point_ID, lon, lat), by = c("point" = "Point_ID"))
+names(merged_df)  # should now include "lon" and "lat"
+
+merged_df$lon <- as.numeric(merged_df$lon)
+merged_df$lat <- as.numeric(merged_df$lat)
+# Remove lat lon rows with NA
+merged_df_clean <- merged_df[!is.na(merged_df$lon) & !is.na(merged_df$lat), ]
+
+#pull surface colors:
+surface_colors <- merged_df_clean %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  group_by(point) %>%
+  slice(1) %>%
+  ungroup()
+
+#plot surface colors:
+ggplot(surface_colors, aes(x = lon, y = lat)) +
+  geom_point(aes(color = color), size = 5) +  # assuming color is the hex string column
+  scale_color_identity() +  # tells ggplot to treat the color values as literal hex codes
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = "Surface Horizon Color") +
+  geom_text(aes(label = matrix_color), hjust = -0.2, size = 2)
+
+
+
+
+data_frame <- data_frame %>%
+  mutate(
+    depletions = ifelse(depletions == "Yes", 1, 0),
+    htm = ifelse(htm == "Yes", 1, 0),
+    first_letter = str_sub(hzid, 1, 1),  # Extract the first letter
+    first_letter_code = case_when(
+      first_letter == "A" ~ 1,  # Assign code 1 for horizons starting with "A"
+      first_letter == "B" ~ 2,  
+      first_letter == "C" ~ 3,  
+      first_letter == "E" ~ 4,  
+      TRUE ~ 0                  
+    ),
+    intermingle_body = ifelse(intermingle_body == "Yes", 1, 0),
+    concentrations = ifelse(concentrations == "Yes", 1, 0)) %>%
+dplyr::select(point, id, hzid, top, bottom, texture, sand, silt, clay, color_corrected, red, green, blue, depletions, concentrations, first_letter_code, htm, intermingle_body) %>% #column selection
+arrange(point, id, hzid, top, bottom, texture, clay, sand, silt, color_corrected) #order
+
+
+# Create a SoilProfileCollection object:
+aqp::depths(data_frame) <- point ~ top + bottom
+#site(spc) <- data_frame[, c("id")]  # Assign profile-level data
+#horizons(spc) <- data_frame         # Assign horizon-level data 
+
+
+```
+
+
+```{r cluster pedons}
+
+hotcoded_columns <- grep("^hzid", colnames(data_frame_with_hotcoding), value = TRUE)
+# Compute the dissimilarity matrix using RGB values
+dissimilarity_matrix <- NCSP(data_frame,
+                             vars = c("red", "green", "blue","top","bottom","depletions", "concentrations", "first_letter_code", "htm", "intermingle_body" ), # Use RGB as numeric
+                             maxDepth = 150,
+                             k = 0.01)
+
+# Print the results
+# print(dissimilarity_matrix)
+# dissimilarity_matrix <- NCSP(data_frame,
+#                                         vars = c("color"),
+#                                         maxDepth = 150,  
+#                                         k = 0.01) 
+
+
+
+# 
+# hc <- hclust(as.dist(dissimilarity_matrix), method = "ward.D2")
+# 
+# num_clusters <- 6  # You can change this to the number of clusters you want
+# clusters <- cutree(hc, k = num_clusters)
+# 
+# # Add clusters to the SPC site-level data
+# site(data_frame)$cluster <- clusters
+# 
+# # Color the dendrogram by cluster
+# dend <- as.dendrogram(hc)
+# dend <- color_branches(dend, k = num_clusters)
+# plot(dend, main = "Dendrogram of Pedons (Colored by Cluster)")
+# 
+# 
+
+# site attributes: 
+# D.s <- compareSites(data_frame, vars = c("hzid"))
+# D <- Reduce(`+`, list(dissimilarity_matrix * 1)) / 1
+
+diana <- diana(dissimilarity_matrix)
+
+par(mar = c(1,0,3,1))
+plotProfileDendrogram(data_frame, diana, label = "point",  width=.5, color = "color", cex.name=0.65, scaling.factor = 0.5)
+
+grp <- cutree(diana, k = 10)
+
+df <- data.frame(
+  id = unique(data_frame$point),
+  cluster = grp)
+
+
+```
+
+
+
+```{r Fetch Soil Series}
+# Fetch OSD data for soil series in the southeastern U.S. IDK even if this is how this works bruh
+perry_soil_series <- c("boswell", "faceville", "grady", "lucy","greenville","henderson", #based on SSURGO data
+                       "lakeland", "lynchburg","norfolk","oktibbeha","orangeburg","red bay","sumter","susquehanna","vaucluse","dothan","americus","hazelhurst","clarendon")
+osd_data <- fetchOSD(perry_soil_series, colorState = "moist")
+
+```
+
+```{r plot OSDs}
+
+plotOSDs <- plotSPC(osd_data, name.style = 'center-center', max.depth = 150) ; title('OSD around Perry Ga')
+
+```
+```{r}
+sorted_order <- order(site(data_frame)$point)
+
+# Rebuild the SoilProfileCollection with the new profile order
+data_frame <- data_frame[sorted_order, ]
+
+plotSPC(data_frame,
+        name = "hzid",
+        label = "point",
+        name.style = 'center-center',
+        color = "color") ; title('All profiles in Perry')
+
+subset_pedons <- subset(data_frame, point %in% c("80","78","57"))
+
+plotSPC(subset_pedons,
+        name = "hzid",
+        label = "point",
+        name.style = 'center-center',
+        color = "color") ; title('Points 57, 78, 80')
+
+
+
+
+subset_pedonse <- subset(data_frame, point %in% c("2"))
+
+plotSPC(subset_pedonse,
+        name = "hzid",
+        label = "Point",
+        name.style = 'center-center',
+        color = "color") ; title('Point 2')
+
+soil_series_albany <- fetchOSD(soils = c("albany"))
+plot(soil_series_albany, name.style = 'center-center', max.depth = 150) ; title('Albany')
+
+soil_series_bonneau <- fetchOSD(soils = c("bonneau"))
+plot(soil_series_bonneau, name.style = 'center-center', max.depth = 150) ; title('Bonneau')
+
+soil_series_greenville <- fetchOSD(soils = c("greenville"))
+plot(soil_series_greenville, name.style = 'center-center', max.depth = 150) ; title('Greenville')
+```
+
+```{r Plot clusters}
+# Subset specific IDs
+subset_pedons1 <- subset(data_frame, point %in% c("29","30","40"))
+
+# Plot the subset
+plot(subset_pedons1, 
+     name = "point",  # Label with texture
+     label = "color")      # Label profiles with ID
+
+# Subset specific IDs
+subset_pedons2 <- subset(data_frame, point %in% c("68","69","61","62","63"))
+
+# Plot the subset
+plot(subset_pedons2, 
+     name = "point",  # Label with texture
+     label = "color")      # Label profiles with ID
+
+
+
+# Step 1: Subset your pedons (e.g., "P1" and "44")
+subset_pedons3 <- subset(data_frame, id %in% c("44", "34","P4","23"))
+
+# Step 2: Fetch the "Grady" soil series data
+soil_series_grady <- fetchOSD(soils = c("Grady"))
+
+# Step 3: Create an empty plot and initialize
+#plot(subset_pedons3, 
+#     name = "point", 
+#     label = "id", 
+#     main = "Pedons P1 & 44 vs Grady Soil Series")
+
+# Now, add the "Grady" soil series to the plot
+plot(soil_series_grady)
+```
+
+
+```{r Soil Similarity func.}
+# Similarity function based on Euclidean distance
+calculate_similarity <- function(pedon, series_horizon) {
+  sqrt(
+    (pedon$sand - series_horizon$sand)^2 +
+    (pedon$silt - series_horizon$silt)^2 +
+    (pedon$clay - series_horizon$clay)^2)}
+
+
+```
+
+
+
+```{r Soil Series Match}
+# Initialize list to store matches
+matches <- list()
+
+# Loop through each pedon in your data
+for (i in unique(data_frame$id)) {
+  # Subset data for the current pedon
+  pedon <- data_frame %>% filter(id == i)
+  
+  # Calculate similarity for each soil series
+  similarities <- sapply(osd_data$horizons, function(series_horizon) {
+    mean(sapply(1:nrow(pedon), function(j) {
+      calculate_similarity(pedon[j, ], series_horizon)
+    }), na.rm = TRUE)
+  })
+  
+  # Find the best match
+  best_match <- names(which.min(similarities))
+  matches[[i]] <- best_match
+}
+
+# Create a data frame of matches
+matched_series <- data.frame(
+  id = names(matches),
+  best_match = unlist(matches)
+)
+
+print(matched_series)
+
+```
+
+```{r Network}
+# get basic OSD data for queried series and siblings
+s <- siblings('orangeburg', component.data = TRUE)
+s.list <- unique(c(s$sib$series[1], s$sib$sibling))
+h <- fetchOSD(s.list)
+
+# plot dendrogram + profiles
+SoilTaxonomyDendrogram(h, y.offset = 0.4, width = 0.3, name.style = 'center-center', depth.axis = list(line = -3))
+
+```
+
+
+```{r test}
+s2 <- siblings('orangeburg', component.data = TRUE)
+```
+
+
+```{r save profiles}
+for (profile_point in unique(site(data_frame)$point)) {
+  
+  # Subset point
+  profile_subset <- data_frame[site(data_frame)$point == profile_point, ]
+  
+  output_file <- file.path("../output/profile_plots", paste0("Profile_Point_", profile_point, ".png"))
+  
+  # Save plot
+  png(filename = output_file, width = 1200, height = 800)
+  plotSPC(profile_subset,
+          name = "hzid",
+          label = "point",
+          name.style = 'center-center',
+          color = "color",
+          cex.names = 1.5, 
+          cex.id = 1.5)    
+  title(paste("Profile for Point:", profile_point))
+  dev.off()
+}
+
+cat("done:", output_folder)
+```
+
+
+

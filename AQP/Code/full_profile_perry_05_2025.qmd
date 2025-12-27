@@ -1,0 +1,811 @@
+---
+title: "Full_Profile_Perry_05_2025"
+author: "Madelyn Willis"
+format: html
+editor: visual
+---
+
+```{r packages, include=FALSE, message=FALSE}
+library(colorspace)
+library(aqp)
+library(soilDB)
+library(dendextend)
+library(latticeExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(SoilTaxonomy)
+library(dplyr)
+library(janitor)
+library(tidyr)
+library(stringr)
+library(cluster)
+library(terra)
+library(scico)
+library(randomForest)
+library(leaflet)
+library(tidymodels)
+library(tidyverse)
+library(vip)
+library(ranger)
+library(finetune)
+library(beepr)
+library(tmap)
+library(sf)
+```
+
+###Pull Data:
+
+```{r data}
+#Spatial Full profile points:
+FPspatial <- terra::vect("../Data/Full Profile Data/Spatial/Perry_all_FP_samples_clean.shp")
+
+# Load Perry data
+data_frame <- read.csv("../Data/Full Profile Data/Perry Full-Profile SampleData Dev 2025.csv", header = TRUE, sep = ",")
+```
+
+###Data Wrangling:
+
+```{r wrangling}
+data_frame <- data_frame %>%
+  clean_names %>% 
+  dplyr::rename(id = sample_id_lab) %>% #rename to id
+  dplyr::rename(hzid = horizon) %>% #rename to hzid
+  mutate(top = as.numeric(sub("-.*", "", to_depth_cm)),  # Extracts top depth
+    bottom = as.numeric(str_remove(sub(".*-", "", to_depth_cm), "\\+"))) 
+
+texture_map <- c(
+  "LS" = "loamy_sand",
+  "SCL" = "sandy_clay_loam",
+  "SL" = "sandy_loam",
+  "L" = "loam",
+  "CL" = "clay_loam",
+  "S" = "sand",
+  "C" = "clay",
+  "SIL" = "silt_loam",
+  "SI" = "silt",
+  "SC" = "sandy_clay",
+  "C " = "clay")
+
+# Replace texture abbreviations with full names
+data_frame <- data_frame %>%
+  mutate(texture = recode(lab_texture_lpsa_preliminary, !!!texture_map)) %>%
+  mutate( # Use regex to add a space between hue and value/chroma
+    color_corrected = gsub("([A-Za-z]+)([0-9]+)", "\\1 \\2", matrix_color),
+    # Split color into three parts: Hue, Value, and Chroma
+    hue = sapply(strsplit(as.character(color_corrected), " "), function(x) x[1]),
+    value_chroma = sapply(strsplit(as.character(color_corrected), " "), function(x) x[2]),
+    value = sapply(strsplit(value_chroma, "/"), function(x) x[1]),
+    chroma = sapply(strsplit(value_chroma, "/"), function(x) x[2]),
+    color = munsell2rgb(the_hue = hue, the_value = value,  # Split the 'color' column into separate hue, value, and chroma components
+    the_chroma = chroma, return_triplets=FALSE)) #return triplets is false bc otherwise it gives 3 columns with separate rgb
+  
+data_frame$rgb_values <- munsell2rgb(the_hue = data_frame$hue,
+                                     the_value = as.numeric(data_frame$value),
+                                     the_chroma = as.numeric(data_frame$chroma),
+                                     return_triplets = TRUE)
+
+data_frame <- data_frame %>%
+  mutate(red = rgb_values[, 1],
+         green = rgb_values[, 2],
+         blue = rgb_values[, 3]) %>%
+  dplyr::select(-rgb_values) #remove triplets bc we already have them
+
+
+data_frame <- data_frame %>%
+  mutate(hzid = ifelse(str_starts(hzid, "^"), str_remove(hzid, "\\^"), hzid),
+         hzid = str_replace(hzid, "A/E", "AE"),
+         hzid = ifelse(hzid == "", NA, hzid),
+    depletions = ifelse(depletions == "Yes", 1, 0),
+    htm = ifelse(htm == "Yes", 1, 0),
+    first_letter = str_sub(hzid, 1, 1),  # Extract the first letter
+    first_letter_code = case_when(
+      first_letter == "A" ~ 1,  # Assign code 1 for horizon "A"
+      first_letter == "B" ~ 2,  # Assign code 2 for horizon "B"
+      first_letter == "C" ~ 3,  # Assign code 3 for horizon "C"
+      first_letter == "E" ~ 4,  # Assign code 4 for horizon "E"
+      TRUE ~ 0                  # Assign code 0 for anything else
+    ),
+    intermingle_body = ifelse(intermingle_body == "Yes", 1, 0),
+    concentrations = ifelse(concentrations == "Yes", 1, 0)) %>%
+dplyr::select(point, id, hzid, top, bottom, texture, sand, silt, clay, color, red, green, blue, depletions, concentrations, first_letter_code, htm, intermingle_body, matrix_color) %>% #column selection
+arrange(point, id, hzid, top, bottom, texture, clay, sand, silt, color) #order
+
+
+
+```
+
+###Datasets:
+
+```{r}
+# Create a SoilProfileCollection object:
+SPC_df <- data_frame
+aqp::depths(SPC_df) <- point ~ top + bottom
+
+
+#spatial join:
+data_spat <- data_frame %>%
+  left_join(FPspatial, by = c("point" = "Point_ID"), copy = TRUE)
+coords <- as.data.frame(terra::crds(FPspatial))  # extracts X and Y
+names(coords) <- c("lon", "lat")  # rename to match what `vect()` expects
+
+FPspatial_df <- as.data.frame(FPspatial)
+FPspatial_df <- bind_cols(FPspatial_df, coords)
+
+merged_df <- data_frame %>%
+  left_join(FPspatial_df %>% 
+              dplyr::select(Point_ID, lon, lat), by = c("point" = "Point_ID"))
+names(merged_df)  # should now include "lon" and "lat"
+
+merged_df$lon <- as.numeric(merged_df$lon)
+merged_df$lat <- as.numeric(merged_df$lat)
+# Remove lat lon rows with NA
+merged_df_clean <- merged_df[!is.na(merged_df$lon) & !is.na(merged_df$lat), ]
+
+write.csv(merged_df_clean, "../Data/Full Profile Data/Final_Perry_FP_data_2025_clean.csv", row.names = FALSE)
+#save as .gpkg:
+st_write(merged_df_clean, "../Data/Full Profile Data/Final_Perry_FP_data_2025_clean.gpkg", layer = "Perry_FP_data", delete_dsn = TRUE)
+#SPC_df is the SPC
+#data_frame is df
+#data_spat and merged_df_clean is spatial obj
+```
+
+```{r plotting surficial colors}
+#pull surface colors:
+surface_colors <- merged_df_clean %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  group_by(point) %>%
+  slice(1) %>%
+  ungroup()
+
+#plot surface colors:
+ggplot(surface_colors, aes(x = lon, y = lat)) +
+  geom_point(aes(color = color), size = 5) +  # assuming color is the hex string column
+  scale_color_identity() +  # tells ggplot to treat the color values as literal hex codes
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = "Surface Horizon Color") +
+  geom_text(aes(label = matrix_color), hjust = -0.3, size = 2)
+```
+
+```{r Saving pedons as images}
+# 
+# # Set your desired output folder
+# output_folder <- "../output/pedon_images/"
+# 
+# # If you want to ensure the folder exists, uncomment the next line:
+# # dir.create(output_folder, showWarnings = FALSE, recursive = TRUE)
+# 
+# pedon_ids <- unique(profile_id(SPC_df))
+# 
+# for (i in seq_along(pedon_ids)) {
+#   # Find integer index for this pedon
+#   pedon <- SPC_df[which(profile_id(SPC_df) == pedon_ids[i]), ]
+#   
+#   # Create full file path
+# file_name <- paste0(output_folder, pedon_ids[i], ".jpg")
+#   
+#   jpeg(filename = file_name, width = 500, height = 1200, quality = 100)
+#     plotSPC(
+#       pedon,
+#       color = "color",
+#       name = "hzid",
+#       cex.names = 5,                # large font
+#       name.style = "center-center",
+#       hz.depths = TRUE,
+#       depth.axis = FALSE,
+#       width = 0.2,
+#       print.id = FALSE
+#     )
+#       dev.off()
+#     }
+
+```
+
+```{r}
+#remove disturbed profiles: 59, 80, 49, 79, 57, 48
+SPC_df <- SPC_df[!profile_id(SPC_df) %in% c("59", "80", "49", "79", "57", "48", "40", "81"), ]
+```
+
+
+###Clustering
+
+```{r clustering, message=FALSE}
+dissimilarity_matrix <- NCSP(SPC_df,
+                             vars = c("sand","silt","clay","red", "green", "blue","top",
+                                      "bottom","depletions", "concentrations",
+                                      "first_letter_code", "htm", 
+                                      "intermingle_body" ), # Use RGB as numeric
+                             maxDepth = 150,
+                             k = 0.01)
+diana <- diana(dissimilarity_matrix)
+
+par(mar = c(1,0,3,1))
+plotProfileDendrogram(SPC_df, diana, label = "point",  width=.5, color = "color", cex.name=0.65, scaling.factor = 0.4, id.style = 'top', cex.id = .8, dend.color = 2)
+
+grp <- cutree(diana, k = 10)
+#remove profiles from data_frame 
+data_frame <- data_frame[!data_frame$point %in% c("59", "80", "49", "79", "57", "48", "40", "81"), ]
+df <- data.frame(
+  id = unique(data_frame$point),
+  cluster = grp)
+
+# Create sf object from data_frame
+
+df_spatial <- merged_df_clean %>%
+  left_join(df, by = c("point" = "id")) %>%
+  mutate(cluster = as.factor(cluster)) %>%
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 3857)
+
+df_spatial$cluster <- as.factor(df_spatial$cluster)
+
+```
+
+```{r Representative Pedon of Each Cluster}
+# --- Prepare objects ---
+diss <- as.matrix(dissimilarity_matrix)
+cluster_assignments <- grp
+
+# Make sure the pedon IDs used by grp match the dissimilarity matrix rownames
+pedon_ids <- names(cluster_assignments)
+if (is.null(pedon_ids)) pedon_ids <- rownames(diss)
+
+# Representative pedon (medoid) per cluster
+get_medoid <- function(cluster_id) {
+
+  members <- pedon_ids[cluster_assignments == cluster_id]
+  members <- members[members %in% rownames(diss)]  # safety
+
+  # If cluster has 0 or 1 member, return it
+  if (length(members) == 0) return(NA_character_)
+  if (length(members) == 1) return(members[1])
+
+  sub_diss <- diss[members, members, drop = FALSE]  # <- key fix
+  mean_dist <- rowMeans(sub_diss, na.rm = TRUE)
+
+  members[which.min(mean_dist)]
+}
+
+clusters <- sort(unique(cluster_assignments))
+
+representative_pedons <- tibble::tibble(
+  cluster = clusters,
+  rep_pedon = purrr::map_chr(clusters, get_medoid),
+  n_in_cluster = purrr::map_int(clusters, ~ sum(cluster_assignments == .x, na.rm = TRUE))
+)
+
+representative_pedons
+
+
+```
+```{r}
+# --- You already have these from earlier ---
+diss <- as.matrix(dissimilarity_matrix)
+cluster_assignments <- grp
+
+# If diss rownames are not the pedon IDs, stop and fix that first
+# (they should match names(grp) or profile_id(SPC_df))
+rownames(diss)[1:5]
+
+# --- Define your anchor clusters (edit if you want) ---
+anchor_clusters <- c(1, 4, 5)  # core + wet; remove 6/7 if you only want 1/2/4
+
+# --- Get medoid for each anchor cluster (robust) ---
+pedon_ids <- names(cluster_assignments)
+if (is.null(pedon_ids)) pedon_ids <- rownames(diss)
+
+get_medoid <- function(cluster_id) {
+  members <- pedon_ids[cluster_assignments == cluster_id]
+  members <- members[members %in% rownames(diss)]
+  if (length(members) == 0) return(NA_character_)
+  if (length(members) == 1) return(members[1])
+  sub_diss <- diss[members, members, drop = FALSE]
+  mean_dist <- rowMeans(sub_diss, na.rm = TRUE)
+  members[which.min(mean_dist)]
+}
+
+anchor_medoids <- setNames(
+  purrr::map_chr(anchor_clusters, get_medoid),
+  paste0("cluster_", anchor_clusters)
+)
+
+anchor_medoids
+# (should show something like cluster_1 = "9", cluster_2 = "61", cluster_4 = "38", ...)
+
+# --- Function: compute distances from a pedon to each anchor medoid ---
+dist_to_anchors <- function(pedon_id) {
+  pedon_id <- as.character(pedon_id)
+  if (!pedon_id %in% rownames(diss)) stop("Pedon not found in diss rownames: ", pedon_id)
+
+  d <- sapply(anchor_medoids, function(m) diss[pedon_id, m])
+  tibble::tibble(
+    pedon = pedon_id,
+    anchor = names(d),
+    anchor_medoid = unname(anchor_medoids),
+    diss = as.numeric(d)
+  ) %>%
+    dplyr::arrange(diss) %>%
+    dplyr::mutate(rank = dplyr::row_number())
+}
+
+# --- Run for your questionable pedons ---
+questionable <- c("10", "26", "25", "35")
+
+results <- purrr::map_dfr(questionable, dist_to_anchors)
+results
+summary_assign <- results %>%
+  dplyr::group_by(pedon) %>%
+  dplyr::summarise(
+    best_anchor = anchor[1],
+    best_medoid = anchor_medoid[1],
+    best_diss = diss[1],
+    second_diss = diss[2],
+    gap = second_diss - best_diss,
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(pedon)
+
+summary_assign
+
+```
+
+
+```{r plotting clusters, message=FALSE}
+# Create a color palette for the clusters
+cluster_colors <- qualitative_hcl(12, palette = "Set 3") #want to change later
+
+#plotting:
+  # plot(df_spatial["cluster"], 
+  #      col = cluster_colors[as.numeric(df_spatial$cluster)], 
+  #      main = "Clustered Pedons", 
+  #      pch = 19, 
+  #      cex = 1.5, 
+  #      axes = TRUE)
+tmap_mode("view")
+
+df_spatialt<-df_spatial %>%
+  st_transform(4326)
+
+leaflet(df_spatialt) %>%
+  #satellite basemap:
+  addProviderTiles(providers$Esri.WorldImagery) %>%
+  addCircleMarkers(
+    color = ~cluster_colors[as.numeric(cluster)],
+    label = ~paste("Point:", point, "Cluster:", cluster),
+    radius = 5,
+    fillOpacity = 0.7
+  )
+
+
+```
+
+###Random Forest
+
+```{r Random Forest}
+border <- terra::rast(vect("../Data/covariates/border/border.shp"))
+  USGS_DEM = terra::rast("../Data/covariates/output_USGS1m.tif")
+  clipped_stack = terra::rast("../Data/covariates/clipped_stack.tif")
+  pca_SR = terra::rast("../Data/covariates/pca_SR.tif")
+  NDVI = terra::rast("../Data/covariates/NDVI.tif")
+
+#project border to covariates:
+border <- terra::project(border, USGS_DEM)
+border_ext <-ext(border)
+
+USGS_DEM <- terra::crop(USGS_DEM, border_ext)
+clipped_stack <- terra::crop(clipped_stack, border_ext)
+pca_SR <- terra::crop(pca_SR, border_ext)
+NDVI <- terra::crop(NDVI, border_ext)
+USGS_DEM_aligned <- resample(crop(USGS_DEM, NDVI), NDVI)
+pca_SR_aligned   <- resample(crop(pca_SR, NDVI), NDVI)
+clipped_stack_aligned <- resample(crop(clipped_stack, NDVI), NDVI)
+covariates_stack <- c(NDVI, USGS_DEM_aligned, pca_SR_aligned, clipped_stack_aligned)
+
+# names(covariates) <- c(
+#   "USGS_DEM",
+#   "clipped_stack",
+#   "pca_SR",
+#   "NDVI"
+# )
+
+#set clusters as follows: 4 and 6 are 4, 5 and 10 are 5, and 7,8,9,11 are 6:
+df_spatialt$cluster <- case_when(
+  df_spatialt$cluster == 1 ~ 1,
+  df_spatialt$cluster == 2 ~ 2,
+  df_spatialt$cluster == 3 ~ 3,
+  df_spatialt$cluster == 4 ~ 3,
+  df_spatialt$cluster == 5 ~ 4,
+  df_spatialt$cluster == 6 ~ 3,
+  df_spatialt$cluster == 7 ~ 5,
+  df_spatialt$cluster == 8 ~ 5,
+  df_spatialt$cluster == 9 ~ 5,
+  df_spatialt$cluster == 10 ~ 4,
+  df_spatialt$cluster == 11 ~ 5
+)
+
+# Extract raster values at soil sample points
+extractFP <- terra::extract(covariates_stack, df_spatialt, bind = TRUE) %>%
+  as.data.frame(geom = "XY") %>%
+  mutate(
+    hzid = as.factor(hzid),
+    matrix_color = as.factor(matrix_color))
+
+df_response<-df_spatialt %>%
+  dplyr::select(point,cluster) %>%
+  distinct() %>%
+  dplyr::select(cluster)
+
+extractFP<-terra::extract(covariates_stack, df_response, ID = F) %>%
+  cbind(df_response) %>%
+  dplyr::select(!geometry) %>%
+  #set cluster as a factor
+  mutate(cluster = as.factor(cluster))
+
+
+set.seed(626) # Set seed for reproducibility
+# extractFP <- extractFP %>%
+#   dplyr::select(-texture, -red, -green, -blue, -id, -point, -sand, -silt, -clay, -color) # Ensure cluster is a factor
+
+data_split <- initial_split(extractFP, prop = 0.8, strata = cluster)
+
+train_data <- training(data_split)
+
+test_data <- testing(data_split)
+
+#check distributions:
+ggplot() +
+  geom_density(data = train_data, 
+               aes(x = cluster),
+               color = "red") +
+  geom_density(data = test_data, 
+               aes(x = cluster),
+               color = "blue") 
+
+df_recipe <- recipe(cluster ~ ., data = train_data) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_impute_knn(all_predictors(), neighbors = 5)
+
+df_prep <- df_recipe %>%
+  prep()
+
+df_prep
+
+#train_data <- bake(df_prep, new_data = NULL)
+
+#specify the model
+rf_model <- rand_forest(
+  trees = tune(),
+  mtry = tune(),
+  min_n = tune(),
+  mode = "classification"
+) %>%
+  set_engine("ranger", importance = "impurity")
+#resampling strategy:
+resampling_foldcv <- vfold_cv(training(data_split), v = 5, strata = cluster)
+
+#tune the model:
+rf_metrics <- metric_set(accuracy)
+
+ctrl <- control_sim_anneal(save_pred = TRUE)
+
+rf_grid_result <- tune_sim_anneal(
+  object = rf_model,
+  preprocessor = df_recipe,
+  resamples = resampling_foldcv,
+  iter = 100,
+  control = ctrl,
+  metrics = rf_metrics
+)
+
+beepr::beep("wilhelm")
+
+#plot(rf_grid_result)
+rf_grid_result %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  ggplot(aes(x = mtry, y = mean)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Random Forest Hyperparameter Tuning",
+       x = "Number of Variables Tried at Each Split (mtry)",
+       y = "Mean Accuracy")
+
+#best params:
+best_params <- show_best(rf_grid_result, metric = "accuracy", n = 1)
+
+#final model:
+rf_model_final <- finalize_model(rf_model, best_params)
+rf_fit <- rf_model_final %>%
+  fit(cluster ~ ., data = train_data)
+rf_fit
+
+#predict:
+test_baked <- bake(df_prep, new_data = test_data)
+
+rf_predictions <- rf_fit %>%
+  predict(new_data = test_data) %>%
+  bind_cols(test_data)
+
+
+#roc-auc validation
+
+rf_predictions %>%
+  roc_auc(truth = cluster, .pred_class) %>%
+  mutate(.metric = "roc_auc") %>%
+  ggplot(aes(x = .metric, y = .estimate)) +
+  geom_col() +
+  labs(title = "ROC AUC for Random Forest Model",
+       x = "Metric",
+       y = "Value") +
+  theme_minimal()
+
+#plot predictions:
+rf_predictions %>%
+  ggplot(aes(x = cluster, y = .pred_class)) +
+  geom_jitter() +
+  labs(title = "Random Forest Predictions vs Actual",
+       x = "Actual Cluster",
+       y = "Predicted Cluster") +
+  theme_minimal()
+
+#plot map: (this only plots test data.. need to figure out how to plot the whole map)
+leaflet(rf_predictions) %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>%
+  addCircleMarkers(
+    lng = ~x,     # use your x column as longitude
+    lat = ~y,     # use your y column as latitude
+    color = ~cluster_colors[as.numeric(.pred_class)],
+    label = ~paste("Cluster:", cluster),
+    radius = 5,
+    fillOpacity = 0.7
+  )
+
+rf_predict_spatrast<-predict(rf_fit,covariates_stack)
+
+prediction_rast<-rast(covariates_stack$NDVI)
+
+values(prediction_rast)<- NA
+
+names(prediction_rast) <- NA
+
+values(prediction_rast) <- rf_predict_spatrast
+
+#plot map:
+
+plot(prediction_rast)
+
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>%
+  addRasterImage(rf_predict_spatrast$predictions, 
+                 colors = cluster_colors,
+                 opacity = 0.5)
+```
+
+```{r}
+
+
+predict_clusters_fun <- function(pixel_vector) {
+  # pixel_vector: numeric vector with length = number of raster layers (covariates)
+  
+  # If any NA in pixel_vector, return NA (no prediction)
+  if (any(is.na(pixel_vector))) return(NA)
+  
+  # Convert to data frame with 1 row, colnames = covariates_stack names
+  newdata <- as.data.frame(t(pixel_vector))
+  colnames(newdata) <- names(covariates_stack)
+  
+  # Preprocess with your recipe
+  newdata_prep <- bake(df_prep, new_data = newdata)
+  
+  # Predict cluster (class)
+  pred <- predict(rf_fit, newdata_prep, type = "class")
+  
+  # Convert factor to numeric cluster
+  as.numeric(as.factor(pred$.pred_class))
+}
+extractFP <- terra::extract(covariates_stack, df_spatialt, bind = TRUE)
+# Apply prediction function to raster stack using terra::app()
+pred_raster <- app(rast(extractFP), fun = predict_clusters_fun)
+
+# Plot result with cluster colors
+plot(pred_raster, col = cluster_colors, main = "Predicted Clusters via terra::app()")
+legend("topright", legend = levels(as.factor(rf_fit$trainingData$.outcome)),
+       fill = cluster_colors, title = "Cluster")
+
+```
+
+### 50 cm RF
+
+```{r with high res DEM}
+
+covariates50 = terra::rast("../Data/covariates/DEM_covariates_50cm.tif") %>%
+  #mask:
+  terra::mask(border_ext)
+
+
+# Extract raster values at soil sample points
+extractFP <- terra::extract(covariates50, df_spatialt, bind = TRUE) %>%
+  as.data.frame(geom = "XY") %>%
+  mutate(
+    hzid = as.factor(hzid),
+    matrix_color = as.factor(matrix_color))
+
+df_response<-df_spatialt %>%
+  dplyr::select(point,cluster)  %>%
+   distinct() %>%
+   dplyr::select(cluster)
+
+extractFP<-terra::extract(covariates50, df_response, ID = F) %>% 
+  cbind(df_response) %>%
+  dplyr::select(!geometry) %>%
+  #set cluster as a factor
+  mutate(cluster = as.factor(cluster))
+
+set.seed(626) # Set seed for reproducibility
+# extractFP <- extractFP %>%
+#   dplyr::select(-texture, -red, -green, -blue, -id, -point, -sand, -silt, -clay, -color) # Ensure cluster is a factor
+
+data_split <- initial_split(extractFP, prop = 0.8, strata = cluster)
+
+train_data <- training(data_split)
+
+test_data <- testing(data_split)
+
+#check distributions:
+ggplot() +
+  geom_density(data = train_data, 
+               aes(x = cluster),
+               color = "red") +
+  geom_density(data = test_data, 
+               aes(x = cluster),
+               color = "blue") 
+
+df_recipe <- recipe(cluster ~ ., data = train_data) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_impute_knn(all_predictors(), neighbors = 5) #%>%
+
+
+df_prep <- df_recipe %>%
+  prep()
+
+df_prep
+
+#train_data <- bake(df_prep, new_data = NULL)
+
+#specify the model
+rf_model <- rand_forest(
+  trees = tune(),
+  mtry = tune(),
+  min_n = tune(),
+  mode = "classification"
+) %>%
+  set_engine("ranger", importance = "impurity")
+#resampling strategy:
+resampling_foldcv <- vfold_cv(training(data_split), v = 5, strata = cluster)
+
+#tune the model:
+rf_metrics <- metric_set(accuracy)
+
+ctrl <- control_sim_anneal(save_pred = TRUE)
+
+rf_grid_result <- tune_sim_anneal(
+  object = rf_model,
+  preprocessor = df_recipe,
+  resamples = resampling_foldcv,
+  iter = 100,
+  control = ctrl,
+  metrics = rf_metrics
+)
+
+beepr::beep("wilhelm")
+
+#plot(rf_grid_result)
+rf_grid_result %>%
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>%
+  ggplot(aes(x = mtry, y = mean)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Random Forest Hyperparameter Tuning",
+       x = "Number of Variables Tried at Each Split (mtry)",
+       y = "Mean Accuracy")
+
+#best params:
+best_params <- show_best(rf_grid_result, metric = "accuracy", n = 1)
+
+#final model:
+rf_model_final <- finalize_model(rf_model, best_params)
+rf_fit <- rf_model_final %>%
+  fit(cluster ~ ., data = train_data)
+rf_fit
+
+#predict:
+test_baked <- bake(df_prep, new_data = test_data)
+
+rf_predictions <- rf_fit %>%
+  predict(new_data = test_data) %>%
+  bind_cols(test_data)
+
+
+#roc-auc validation
+
+# rf_predictions %>%
+#   roc_auc(truth = cluster, .pred_class) %>%
+#   mutate(.metric = "roc_auc") %>%
+#   ggplot(aes(x = .metric, y = .estimate)) +
+#   geom_col() +
+#   labs(title = "ROC AUC for Random Forest Model",
+#        x = "Metric",
+#        y = "Value") +
+#   theme_minimal()
+
+#plot predictions:
+rf_predictions %>%
+  ggplot(aes(x = cluster, y = .pred_class)) +
+  geom_jitter() +
+  labs(title = "Random Forest Predictions vs Actual",
+       x = "Actual Cluster",
+       y = "Predicted Cluster") +
+  theme_minimal()
+
+#plot map: (this only plots test data.. need to figure out how to plot the whole map)
+leaflet(rf_predictions) %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>%
+  addCircleMarkers(
+    lng = ~x,     # use your x column as longitude
+    lat = ~y,     # use your y column as latitude
+    color = ~cluster_colors[as.numeric(.pred_class)],
+    label = ~paste("Cluster:", cluster),
+    radius = 5,
+    fillOpacity = 0.7
+  )
+
+rf_predict_spatrast<-predict(rf_fit,covariates_stack)
+
+prediction_rast<-rast(covariates_stack$NDVI)
+
+values(prediction_rast)<- NA
+
+names(prediction_rast) <- NA
+
+values(prediction_rast) <- rf_predict_spatrast
+
+#plot map:
+
+plot(prediction_rast)
+
+leaflet() %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>%
+  addRasterImage(rf_predict_spatrast$predictions, 
+                 colors = cluster_colors,
+                 opacity = 0.5)
+
+predict_clusters_fun <- function(pixel_vector) {
+  # pixel_vector: numeric vector with length = number of raster layers (covariates)
+  
+  # If any NA in pixel_vector, return NA (no prediction)
+  if (any(is.na(pixel_vector))) return(NA)
+  
+  # Convert to data frame with 1 row, colnames = covariates_stack names
+  newdata <- as.data.frame(t(pixel_vector))
+  colnames(newdata) <- names(covariates_stack)
+  
+  # Preprocess with your recipe
+  newdata_prep <- bake(df_prep, new_data = newdata)
+  
+  # Predict cluster (class)
+  pred <- predict(rf_fit, newdata_prep, type = "class")
+  
+  # Convert factor to numeric cluster
+  as.numeric(as.factor(pred$.pred_class))
+}
+extractFP <- terra::extract(covariates_stack, df_spatialt, bind = TRUE)
+# Apply prediction function to raster stack using terra::app()
+pred_raster <- app(rast(extractFP), fun = predict_clusters_fun)
+
+# Plot result with cluster colors
+plot(pred_raster, col = cluster_colors, main = "Predicted Clusters via terra::app()")
+legend("topright", legend = levels(as.factor(rf_fit$trainingData$.outcome)),
+       fill = cluster_colors, title = "Cluster")
+
+```

@@ -23,12 +23,14 @@ library(janitor)
 library(tidyr)
 library(stringr)
 library(cluster)
+library(terra)
 ```
 
 
 
 ```{r Data Frame}
 
+FPspatial <- terra::vect("../Data/Full Profile Data/Spatial/Perry_all_FP_samples_clean.shp")
 
 # Load Perry data and wrangle
 data_frame <- read.csv("../Data/Full Profile Data/Final_Perry_FP_data_2025.csv", header = TRUE, sep = ",")
@@ -145,9 +147,13 @@ hotcoded_data <- data_frame %>%
   mutate(hzid = as.factor(hzid)) %>%  # Convert hzid to a factor
   model.matrix(~ hzid - 1, .) %>%     # Create binary columns for each level of hzid
   as.data.frame()                     # Convert to a data frame
-
-# Combine the one-hot-encoded columns with the original data (if needed)
-data_frame_with_hotcoding <- bind_cols(data_frame, hotcoded_data)
+#merge with spatial data:
+data_spat <- data_frame %>%
+  left_join(FPspatial, by = c("point" = "Point_ID"), copy = TRUE) #%>%
+  #mutate(point = as.character(point)) %>%
+ # select(-geometry)
+# # Combine the one-hot-encoded columns with the original data (if needed)
+# data_frame_with_hotcoding <- bind_cols(data_frame, hotcoded_data)
 #Apply the horizon mapping to create `horizon_code`
 data_frame <- data_frame %>%
   mutate(hzid = ifelse(str_starts(hzid, "^"), str_remove(hzid, "\\^"), hzid),
@@ -181,7 +187,7 @@ aqp::depths(data_frame) <- point ~ top + bottom
 
 ```{r cluster pedons}
 
-hotcoded_columns <- grep("^hzid", colnames(data_frame_with_hotcoding), value = TRUE)
+#hotcoded_columns <- grep("^hzid", colnames(data_frame_with_hotcoding), value = TRUE)
 # Compute the dissimilarity matrix using RGB values
 dissimilarity_matrix <- NCSP(data_frame,
                              vars = c("red", "green", "blue","top","bottom","depletions", "concentrations", "first_letter_code", "htm", "intermingle_body" ), # Use RGB as numeric
@@ -220,8 +226,242 @@ dissimilarity_matrix <- NCSP(data_frame,
 diana <- diana(dissimilarity_matrix)
 
 par(mar = c(1,0,3,1))
-plotProfileDendrogram(data_frame, diana, label = "point",  width=.5, color = "color", cex.name=0.65, scaling.factor = 0.5)
+plotProfileDendrogram(data_frame, diana, label = "point",  width=.5, color = "color", cex.name=0.65, scaling.factor = 0.5, id.style = 'top', cex.id = .8, dend.color = 2)
+
+grp <- cutree(diana, k = 12)
+
+df <- data.frame(
+  id = unique(data_frame$point),
+  cluster = grp)
+
+# Create sf object from data_frame
+
+df_spatial <- merged_df_clean %>%
+  left_join(df, by = c("point" = "id")) %>%
+  mutate(cluster = as.factor(cluster)) %>%
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 3857)
+
+df_spatial$cluster <- as.factor(df_spatial$cluster)
+
+
+
+
+
+
+
+plot(df_spatial["cluster"], 
+     col = cluster_colors[as.numeric(df_spatial$cluster)], 
+     main = "Clustered Pedons", 
+     pch = 19, 
+     cex = 1.5, 
+     axes = TRUE)
+
+tmap_mode("view")
+
+df_spatialt<-df_spatial %>%
+  st_transform(4326)
+
+leaflet(df_spatialt) %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>%
+  addCircleMarkers(
+    color = ~cluster_colors[as.numeric(cluster)],
+    label = ~paste("Point:", point),
+    radius = 5,
+    fillOpacity = 0.7
+  )
+
+
+
 ```
+```{r}
+library(dplyr)
+library(sf)
+library(concaveman) # for concave hulls
+library(ggplot2)
+library(purrr)
+
+
+# Group by cluster and create concave polygons
+# Split the sf object into a list of data frames by cluster
+cluster_list <- df_spatial %>%
+  group_by(cluster) %>%
+  group_split()
+
+# Apply concaveman to each cluster and keep cluster ID
+cluster_polygons <- map_dfr(cluster_list, function(cluster_sf) {
+  concave_poly <- concaveman(cluster_sf)
+  cluster_id <- unique(cluster_sf$cluster)
+  concave_poly$cluster <- cluster_id
+  concave_poly
+})
+# Ensure both are in the same CRS (WGS84)
+df_spatialt <- df_spatial %>% st_transform(4326)
+# Ensure polygons are in WGS84 for leaflet
+cluster_polygons_t <- cluster_polygons %>% st_transform(4326)
+
+# Assign colors to each polygon row (use consistent coloring)
+cluster_polygons_t$color <- cluster_colors[seq_len(nrow(cluster_polygons_t))]
+
+# Create zone labels in advance
+cluster_polygons_t$label <- paste("Zone", seq_len(nrow(cluster_polygons_t)))
+# Drop Z and M dimensions from geometry
+cluster_polygons_t <- st_zm(cluster_polygons_t, drop = TRUE, what = "ZM")
+
+# Now plot
+leaflet(cluster_polygons_t) %>%
+  addProviderTiles(providers$Esri.WorldTopoMap) %>%
+  addPolygons(
+    fillColor = ~color,
+    fillOpacity = 0.5,
+    color = "black",
+    weight = 1,
+    label = ~label)
+
+
+
+```
+```{r}
+library(dplyr)
+library(randomForest)  # or ranger
+library(caret)         # for train/test split
+
+# 1. Prepare data
+
+predictors <- df_spatial %>%
+  st_drop_geometry() %>%
+  dplyr::select(hzid, matrix_color, cluster, depletions, concentrations, htm, top, bottom) %>%
+  mutate(cluster = as.factor(cluster))
+
+
+# 2. Train-test split (80/20)
+set.seed(123)
+train_index <- createDataPartition(predictors$cluster, p = 0.8, list = FALSE)
+train_data <- predictors[train_index, ]
+test_data <- predictors[-train_index, ]
+
+# 3. Fit Random Forest model
+rf_model <- randomForest(cluster ~ ., data = train_data, ntree = 500, importance = TRUE)
+
+# 4. Evaluate on test set
+pred <- predict(rf_model, newdata = test_data)
+confusion <- caret::confusionMatrix(pred, test_data$cluster)
+print(confusion)
+
+# 5. Variable importance plot
+varImpPlot(rf_model)
+
+library(dplyr)
+library(sf)
+library(tmap)
+
+# Add predicted clusters to test_data
+test_data <- test_data %>%
+  mutate(pred_cluster = pred)
+
+# Join test_data predictions back to spatial data by unique ID (hzid)
+predicted_sf <- df_spatial %>%
+  filter(hzid %in% test_data$hzid) %>%
+  left_join(test_data %>% select(hzid, pred_cluster), by = "hzid")
+
+# Plot predicted clusters
+tmap_mode("plot")  # or "view" for interactive
+
+tm_shape(predicted_sf) +
+  tm_dots(col = "pred_cluster", palette = "Set3", 
+          title = "Predicted Cluster", size = 0.7) +
+  tm_layout(legend.outside = TRUE)
+
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(sf)
+library(caret)
+library(randomForest)
+library(tmap)
+
+# 1. Prepare data, keep 'point' for joining but exclude from predictors
+predictors <- df_spatial %>%
+  st_drop_geometry() %>%
+  dplyr::select(point, hzid, matrix_color, cluster, depletions, concentrations, htm, top, bottom) %>%
+  mutate(cluster = as.factor(cluster))
+
+# 2. Train-test split (80/20) using 'point' as identifier
+set.seed(123)
+train_index <- createDataPartition(predictors$cluster, p = 0.8, list = FALSE)
+train_data <- predictors[train_index, ]
+test_data <- predictors[-train_index, ]
+
+# 3. Fit Random Forest model excluding 'point' as predictor
+rf_model <- randomForest(cluster ~ . - point, data = train_data, ntree = 500, importance = TRUE)
+
+# 4. Predict on test set and add predictions to test_data
+pred <- predict(rf_model, newdata = test_data)
+test_data <- test_data %>%
+  mutate(pred_cluster = pred)
+
+# 5. Join predictions back to spatial data by 'point'
+predicted_sf <- df_spatial %>%
+  filter(point %in% test_data$point) %>%
+  left_join(test_data %>% 
+              dplyr::select(point, pred_cluster), by = "point")
+
+# 6. Plot predicted clusters using tmap
+library(tmap)
+tmap_mode("plot")
+predicted_sf <- predicted_sf %>%
+  dplyr::select(-rgb_values)  # Remove RGB values if not needed))
+tm_shape(predicted_sf) +
+  tm_dots(col = "pred_cluster", palette = "Set3", size = 0.7, title = "Predicted Cluster")
+
+
+# Optional: print confusion matrix and variable importance
+confusion <- caret::confusionMatrix(pred, test_data$cluster)
+print(confusion)
+varImpPlot(rf_model)
+
+```
+```{r}
+library(raster)
+library(randomForest)
+library(dplyr)
+library(sf)
+library(tmap)
+
+# 1. Load or prepare raster layers for all predictors (must match predictors used in model)
+# Example: matrix_color_raster, depletions_raster, concentrations_raster, htm_raster, top_raster, bottom_raster
+
+# Stack rasters
+predictor_stack <- stack()
+
+names(predictor_stack) <- c("matrix_color", "depletions", "concentrations", "htm", "top", "bottom")
+
+# 2. Convert raster stack to data frame for prediction
+predict_df <- as.data.frame(predictor_stack, xy = TRUE, na.rm = FALSE)
+
+# 3. Make sure data types match model training (e.g., factor or numeric)
+# Convert matrix_color to factor if needed:
+predict_df$matrix_color <- as.factor(predict_df$matrix_color)
+
+# 4. Predict clusters for all pixels
+predict_df$pred_cluster <- predict(rf_model, newdata = predict_df)
+
+# 5. Convert prediction back to raster
+# Create empty raster for output
+cluster_raster <- raster(predictor_stack[[1]])
+# Assign predicted clusters, matching by cell index
+cluster_raster[] <- as.numeric(as.factor(predict_df$pred_cluster))
+
+# 6. Plot
+plot(cluster_raster, col = rainbow(length(unique(predict_df$pred_cluster))),
+     main = "Predicted Management Zones (Clusters)")
+
+```
+
+
 
 ```{r Fetch Soil Series}
 # Fetch OSD data for soil series in the southeastern U.S. IDK even if this is how this works bruh

@@ -206,7 +206,6 @@ ggplot(surface_colors, aes(x = lon, y = lat)) +
 SPC_df <- SPC_df[!profile_id(SPC_df) %in% c("59", "80", "49", "79", "57", "48", "40", "81"), ]
 ```
 
-
 ###Clustering
 
 ```{r clustering, message=FALSE}
@@ -277,6 +276,7 @@ representative_pedons
 
 
 ```
+
 ```{r}
 # --- You already have these from earlier ---
 diss <- as.matrix(dissimilarity_matrix)
@@ -347,7 +347,6 @@ summary_assign <- results %>%
 summary_assign
 
 ```
-
 
 ```{r plotting clusters, message=FALSE}
 # Create a color palette for the clusters
